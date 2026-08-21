@@ -1,0 +1,11 @@
+{
+  "name": "operator-blocks",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Operator Blocks - shared-core, swappable-variant puzzle prototype.",
+  "scripts": {
+    "test": "node test/sanity.js",
+    "serve": "python3 -m http.server 8000"
+  }
+}
