@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Operator Blocks</title>
+<link rel="stylesheet" href="style.css" />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+</head>
+<body>
+<header id="topbar">
+  <select id="variant-select" aria-label="Variant"></select>
+  <div id="seed-row">
+    <input id="seed-input" aria-label="Seed" inputmode="numeric" />
+    <button id="seed-copy" type="button">Copy</button>
+  </div>
+  <button id="restart-btn" type="button">Restart</button>
+</header>
+
+<div id="hud"></div>
+
+<main id="play-area">
+  <div id="next-hand-wrap">
+    <div class="label">Next</div>
+    <div id="next-hand"></div>
+  </div>
+
+  <div id="board"></div>
+
+  <div id="game-over" hidden></div>
+
+  <div id="hand-wrap">
+    <div class="label">Hand</div>
+    <div id="hand"></div>
+  </div>
+</main>
+
+<footer id="statbar">
+  <div>Score: <span id="score">0</span></div>
+  <div>Turns: <span id="turns">0</span></div>
+  <button id="export-log" type="button">Export log</button>
+</footer>
+
+<script type="module" src="ui/main.js"></script>
+</body>
+</html>
