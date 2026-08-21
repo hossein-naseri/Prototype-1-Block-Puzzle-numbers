@@ -6,7 +6,7 @@ HTML/JS, no framework, no build step, deploys as a static site.
 ## Status
 
 Build order (see brief): core+sandbox ✅, Triple Bloom ✅, Order Board ✅,
-Logging ✅, Line Level ⏳, Pressure Cooker ⏳, Blueprint+solver ⏳.
+Logging ✅, Line Level ✅, Pressure Cooker ⏳, Blueprint+solver ⏳.
 
 ## Shared core mechanic
 
@@ -150,7 +150,14 @@ See `config/config.js` for the authoritative source.
   since their `allowedOps` restriction flows through the same legality
   check every other cell uses).
 ### C. Blueprint (level-based) — not yet built
-### D. Line Level (endless, high score) — not yet built
+### D. Line Level (endless, high score) ✅
+
+- A row or column clears when every one of its tiles is equal and
+  non-zero (checked after every placement, both axes, no cascade — a
+  cleared line resets to all 0, which can't itself complete another line).
+- Score: `value * boardSize * lineScoreMultiplier` per cleared line
+  (default multiplier 1), so a full row of 6s on a 4×4 board scores 24 —
+  far more than a row of 1s.
 ### E. Pressure Cooker (survival) — not yet built
 
 Each section will be filled in as its variant lands, with the exact rule

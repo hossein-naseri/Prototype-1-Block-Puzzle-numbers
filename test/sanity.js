@@ -4,6 +4,7 @@ import { canPlace } from '../core/legality.js';
 import { applyPlacement } from '../core/resolve.js';
 import { bloom } from '../variants/bloom.js';
 import { orderBoard } from '../variants/orderBoard.js';
+import { lineLevel } from '../variants/lineLevel.js';
 import { variantConfigs } from '../config/config.js';
 
 function t(name, fn) {
@@ -143,6 +144,27 @@ t('order board target increments every N banks', () => {
   const config = { ...variantConfigs.orderBoard, incrementEvery: 1 };
   const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, config);
   assert.strictEqual(result.variantState.target, 4);
+});
+
+t('line level clears a row of all-equal non-zero tiles', () => {
+  const board = createBoard(4);
+  for (let c = 0; c < 4; c++) cellAt(board, 1, c).value = 6;
+  const placement = { changedCells: [{ r: 1, c: 3, op: 'plus1', prevValue: 5, value: 6 }] };
+  const result = lineLevel.onPlacementResolved(board, placement, {}, variantConfigs.lineLevel);
+  assert.strictEqual(result.mutations.length, 4);
+  assert.ok(result.mutations.every((m) => m.patch.value === 0));
+  assert.strictEqual(result.scoreDelta, 6 * 4);
+});
+
+t('line level does not clear a row that is not fully uniform', () => {
+  const board = createBoard(4);
+  cellAt(board, 1, 0).value = 6;
+  cellAt(board, 1, 1).value = 6;
+  cellAt(board, 1, 2).value = 6;
+  cellAt(board, 1, 3).value = 5;
+  const placement = { changedCells: [{ r: 1, c: 3, op: 'plus1', prevValue: 4, value: 5 }] };
+  const result = lineLevel.onPlacementResolved(board, placement, {}, variantConfigs.lineLevel);
+  assert.strictEqual(result.mutations.length, 0);
 });
 
 console.log('\nsanity checks complete');
