@@ -5,7 +5,7 @@ HTML/JS, no framework, no build step, deploys as a static site.
 
 ## Status
 
-Build order (see brief): core+sandbox ✅, Triple Bloom ✅, Order Board ⏳,
+Build order (see brief): core+sandbox ✅, Triple Bloom ✅, Order Board ✅,
 Logging ⏳, Line Level ⏳, Pressure Cooker ⏳, Blueprint+solver ⏳.
 
 ## Shared core mechanic
@@ -131,7 +131,24 @@ See `config/config.js` for the authoritative source.
   happen early if the hand is dominated by `÷2`/`-1` cells and the board
   doesn't yet have matching (even/non-zero) values anywhere — working as
   specified, and exactly the kind of signal the brief is testing for.
-### B. Order Board (endless, high score) — not yet built
+### B. Order Board (endless, high score) ✅
+
+- A target number is shown (`orderBoard.startTarget`, default 3).
+- A tile that lands exactly on the target banks: `scoreDelta +=
+  bankScorePerTarget * target` (default `bankScorePerTarget` = 10, so
+  banking target 3 scores 30), then resets to 0.
+- A tile that lands above the target becomes a **stone**: its
+  `allowedOps` is restricted to `{minus1, div2}` (plus `none`, which is
+  always allowed as it never mutates a value) via the core's generic
+  per-cell lock — core enforces this the same way it enforces the numeric
+  rules, with no variant-specific logic in `core/legality.js`.
+- When a stone's value is brought back to ≤ target via `-1`/`÷2`, it
+  unlocks (`allowedOps` cleared). If it lands exactly on target on the way
+  down, it banks instead of just unlocking.
+- Target increments by 1 every `incrementEvery` banks (default 5).
+- Game over: no legal placement exists (this now also accounts for stones,
+  since their `allowedOps` restriction flows through the same legality
+  check every other cell uses).
 ### C. Blueprint (level-based) — not yet built
 ### D. Line Level (endless, high score) — not yet built
 ### E. Pressure Cooker (survival) — not yet built

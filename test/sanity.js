@@ -3,6 +3,7 @@ import { createBoard, cellAt } from '../core/board.js';
 import { canPlace } from '../core/legality.js';
 import { applyPlacement } from '../core/resolve.js';
 import { bloom } from '../variants/bloom.js';
+import { orderBoard } from '../variants/orderBoard.js';
 import { variantConfigs } from '../config/config.js';
 
 function t(name, fn) {
@@ -111,6 +112,37 @@ t('bloom does not collapse groups smaller than minGroupSize', () => {
   const result = bloom.onPlacementResolved(board, placement, {}, variantConfigs.bloom);
   assert.strictEqual(result.mutations.length, 0);
   assert.strictEqual(result.scoreDelta, 0);
+});
+
+t('order board banks a tile that lands exactly on target', () => {
+  const board = createBoard(4);
+  cellAt(board, 0, 0).value = 3; // just placed
+  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 2, value: 3 }] };
+  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
+  const bankMutation = result.mutations.find((m) => m.r === 0 && m.c === 0);
+  assert.strictEqual(bankMutation.patch.value, 0);
+  assert.strictEqual(result.variantState.banks, 1);
+  assert.strictEqual(result.scoreDelta, variantConfigs.orderBoard.bankScorePerTarget * 3);
+});
+
+t('order board locks a tile that overshoots target into a stone', () => {
+  const board = createBoard(4);
+  cellAt(board, 0, 0).value = 5;
+  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 4, value: 5 }] };
+  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
+  const lockMutation = result.mutations.find((m) => m.r === 0 && m.c === 0);
+  assert.ok(lockMutation.patch.allowedOps.has('minus1'));
+  assert.ok(lockMutation.patch.allowedOps.has('div2'));
+  assert.ok(!lockMutation.patch.allowedOps.has('plus1'));
+});
+
+t('order board target increments every N banks', () => {
+  const board = createBoard(4);
+  cellAt(board, 0, 0).value = 3;
+  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 2, value: 3 }] };
+  const config = { ...variantConfigs.orderBoard, incrementEvery: 1 };
+  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, config);
+  assert.strictEqual(result.variantState.target, 4);
 });
 
 console.log('\nsanity checks complete');
