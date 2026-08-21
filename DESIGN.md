@@ -239,5 +239,6 @@ been live since the first commit.
 
 ## Hosting
 
-Static site, no build step. See `README.md` for exact GitHub Pages setup
-commands.
+Static site, no build step, deploys straight to GitHub Pages. See
+`README.md` for the exact commands and repo settings (Settings → Pages
+needs your account, so that part's left for you to click through).
