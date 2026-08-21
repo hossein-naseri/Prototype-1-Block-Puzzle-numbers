@@ -6,7 +6,7 @@ HTML/JS, no framework, no build step, deploys as a static site.
 ## Status
 
 Build order (see brief): core+sandbox ✅, Triple Bloom ✅, Order Board ✅,
-Logging ⏳, Line Level ⏳, Pressure Cooker ⏳, Blueprint+solver ⏳.
+Logging ✅, Line Level ⏳, Pressure Cooker ⏳, Blueprint+solver ⏳.
 
 ## Shared core mechanic
 
@@ -156,12 +156,34 @@ See `config/config.js` for the authoritative source.
 Each section will be filled in as its variant lands, with the exact rule
 and any decisions made along the way.
 
-## Logging
+## Logging ✅
 
-Not yet built (step 4 of the build order). Will log to `localStorage` per
-session: variant, seed, final score, turns survived, session length, every
-placement (offered hand composition + chosen block + position), and illegal
-placement attempts. Exportable as JSON via a button in the footer.
+`ui/logging.js` writes one session record per game to
+`localStorage['operatorBlocks:sessions']` (an array, appended to — nothing
+is ever sent anywhere). A session closes (and is persisted) on game over
+*or* on restart/variant-switch, whichever comes first, so switching
+variants mid-session doesn't lose the run's data.
+
+Per session:
+
+- `variant`, `seed`, `startedAt`/`endedAt`/`sessionLengthMs`, `finalScore`,
+  `turnsSurvived`.
+- `placements[]`: one entry per successful placement — `offeredHand` (the
+  full 3-block hand, each block's shape and per-cell operator composition,
+  captured *before* this placement so you can see what was passed over),
+  `chosenBlockId`/`chosenShapeId`/`chosenOps`, `anchor`, `scoreDelta`. This
+  is what answers "does the player ever actually want a minus-heavy
+  block?" — cross-reference how often a block with `minus1`/`div2` cells
+  appears in `offeredHand` vs. how often it's the one in `chosenShapeId`.
+- `illegalAttempts[]`: turn, block, its ops, and the attempted anchor — a
+  proxy for confusion/frustration per the brief.
+
+The footer's **Export log** button dumps every stored session (not just the
+current one) as a single downloaded JSON file. Note: this was built
+alongside the core in step 1 (it's small, and having it in place from the
+start meant every later variant's playtest was already being captured) —
+listed here separately per the requested build order, but the code has
+been live since the first commit.
 
 ## Hosting
 
