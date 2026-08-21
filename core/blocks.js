@@ -19,6 +19,13 @@ export function generateBlock(rng, config) {
   return { id: nextId(), shapeId: shape.id, cells };
 }
 
+// Build a block explicitly (no RNG) - used by authored Blueprint levels.
+export function createBlock(shapeId, ops) {
+  const shape = SHAPES.find((s) => s.id === shapeId);
+  const cells = shape.cells.map(([dr, dc], i) => ({ dr, dc, op: ops[i] }));
+  return { id: nextId(), shapeId, cells };
+}
+
 export function generateHand(rng, config, size = 3) {
   const hand = [];
   for (let i = 0; i < size; i++) hand.push(generateBlock(rng, config));

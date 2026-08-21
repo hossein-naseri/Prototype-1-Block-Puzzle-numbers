@@ -6,7 +6,10 @@ import { bloom } from '../variants/bloom.js';
 import { orderBoard } from '../variants/orderBoard.js';
 import { lineLevel } from '../variants/lineLevel.js';
 import { pressure } from '../variants/pressure.js';
+import { blueprint } from '../variants/blueprint.js';
+import { LEVELS } from '../config/levels.js';
 import { variantConfigs } from '../config/config.js';
+import { solveLevel } from '../core/solver.js';
 
 function t(name, fn) {
   try {
@@ -179,6 +182,25 @@ t('pressure cooker turns a tile above the cap into a permanent dead cell', () =>
   const nextBoard = { size: 4, cells: board.cells.map((c) => ({ ...c })) };
   cellAt(nextBoard, 2, 2).blocked = true;
   assert.strictEqual(canPlace(nextBoard, [{ r: 2, c: 2, op: 'none' }]), false, 'blocked once mutation applied');
+});
+
+t('blueprint checkWin requires an exact match against every target cell', () => {
+  const board = createBoard(3);
+  const level = LEVELS[0]; // target: (0,0)=1,(1,1)=1,(2,2)=1
+  const config = { ...variantConfigs.blueprint, level };
+  assert.strictEqual(blueprint.checkWin(board, {}, config), false);
+  level.targetBoard.forEach((v, i) => {
+    board.cells[i].value = v;
+  });
+  assert.strictEqual(blueprint.checkWin(board, {}, config), true);
+});
+
+t('every authored Blueprint level is solvable at its authored par', () => {
+  for (const level of LEVELS) {
+    const result = solveLevel(blueprint, level, variantConfigs.blueprint);
+    assert.ok(result.solvable, `${level.id} should be solvable`);
+    assert.strictEqual(result.par, level.par, `${level.id} par mismatch`);
+  }
 });
 
 console.log('\nsanity checks complete');

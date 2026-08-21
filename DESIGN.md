@@ -6,7 +6,8 @@ HTML/JS, no framework, no build step, deploys as a static site.
 ## Status
 
 Build order (see brief): core+sandbox ✅, Triple Bloom ✅, Order Board ✅,
-Logging ✅, Line Level ✅, Pressure Cooker ✅, Blueprint+solver ⏳.
+Logging ✅, Line Level ✅, Pressure Cooker ✅, Blueprint+solver ✅. All
+five variants plus sandbox are built.
 
 ## Shared core mechanic
 
@@ -150,7 +151,37 @@ See `config/config.js` for the authoritative source.
 - Game over: no legal placement exists (this now also accounts for stones,
   since their `allowedOps` restriction flows through the same legality
   check every other cell uses).
-### C. Blueprint (level-based) — not yet built
+### C. Blueprint (level-based) ✅
+
+- No RNG at all. `config/levels.js` defines each level as `{ boardSize,
+  startBoard, targetBoard, handSequence, par }` — the target grid is shown
+  next to the play grid (dimmed cells are 0/don't-care visually, but note
+  the win check is an **exact** match against every cell, not just the
+  non-zero ones).
+- `handSequence` is an array of hands (3 block specs each); the engine's
+  generic `getNextHand` hook (see `core/engine.js`) is overridden so hands
+  are pulled from this fixed sequence instead of the RNG, advancing a
+  `handIndex` in variant state each time a hand is fully consumed. Within a
+  hand, the player may place its 3 blocks in any order — this matters for
+  levels like #8, where a `+1` must land before a `×2` on the same cell.
+- Level authoring rule (see comment in `levels.js`): since the win check
+  runs after every placement, a block that isn't needed for the intended
+  solution is only safe in the *last* hand a level needs — once the
+  winning placement lands, remaining hand blocks are never forced into
+  play. Every block in an earlier, fully-exhausted hand must be part of
+  the solution (and non-conflicting), or exhausting that hand would
+  overwrite an already-correct target cell before the level can be won.
+- Ships 8 hand-authored levels (`config/levels.js`), each with a stated
+  `par`. `core/solver.js` brute-forces (depth-limited BFS over every legal
+  placement of every hand block) to confirm solvability and find the true
+  optimal par; `scripts/solve-levels.mjs` runs it over all 8 from Node
+  (`node scripts/solve-levels.mjs`) and all 8 currently solve exactly at
+  their authored par. It's also reachable live in a session's browser
+  console as `OperatorBlocks.solveLevel()` / `OperatorBlocks.solveAllLevels()`
+  once the page has loaded.
+- Win: board matches `targetBoard` exactly. Loss: the scripted hand
+  sequence runs out (or the current hand has no legal placement) without
+  a match.
 ### D. Line Level (endless, high score) ✅
 
 - A row or column clears when every one of its tiles is equal and

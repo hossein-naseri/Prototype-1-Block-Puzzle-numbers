@@ -75,12 +75,45 @@ body {
   margin-bottom: 0.25rem;
 }
 
+#boards-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+}
+
 #board {
   display: grid;
   gap: 6px;
-  width: min(92vw, 420px);
+  width: min(78vw, 380px);
   aspect-ratio: 1;
 }
+
+#target-wrap {
+  width: min(20vw, 110px);
+}
+
+#target-board {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+.target-cell {
+  background: var(--cell-zero);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(0.6rem, 3vw, 0.95rem);
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.target-cell.nonzero { color: var(--accent); }
+.target-cell.matched { color: var(--legal); outline: 1px solid var(--legal); }
 
 .cell {
   background: var(--cell);

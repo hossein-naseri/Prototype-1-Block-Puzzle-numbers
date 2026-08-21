@@ -10,6 +10,7 @@
 <body>
 <header id="topbar">
   <select id="variant-select" aria-label="Variant"></select>
+  <select id="level-select" aria-label="Level" hidden></select>
   <div id="seed-row">
     <input id="seed-input" aria-label="Seed" inputmode="numeric" />
     <button id="seed-copy" type="button">Copy</button>
@@ -25,7 +26,13 @@
     <div id="next-hand"></div>
   </div>
 
-  <div id="board"></div>
+  <div id="boards-row">
+    <div id="target-wrap" hidden>
+      <div class="label">Target</div>
+      <div id="target-board"></div>
+    </div>
+    <div id="board"></div>
+  </div>
 
   <div id="game-over" hidden></div>
 

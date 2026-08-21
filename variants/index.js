@@ -3,6 +3,7 @@ import { bloom } from './bloom.js';
 import { orderBoard } from './orderBoard.js';
 import { lineLevel } from './lineLevel.js';
 import { pressure } from './pressure.js';
+import { blueprint } from './blueprint.js';
 
 // Variants register themselves here as they're built (see build order in
 // DESIGN.md). Each entry implements the shared interface documented in
@@ -13,6 +14,7 @@ export const VARIANTS = {
   orderBoard,
   lineLevel,
   pressure,
+  blueprint,
 };
 
 export function getVariant(name) {

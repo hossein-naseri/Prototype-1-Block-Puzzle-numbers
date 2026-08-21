@@ -63,6 +63,25 @@ export function renderBoard(boardEl, board, onCellPointerEnter, onCellPointerUp,
   }
 }
 
+export function renderTargetGrid(el, targetValues, boardSize, currentBoard) {
+  el.style.gridTemplateColumns = `repeat(${boardSize}, 1fr)`;
+  el.style.gridTemplateRows = `repeat(${boardSize}, 1fr)`;
+  el.innerHTML = '';
+  for (let i = 0; i < targetValues.length; i++) {
+    const cellEl = document.createElement('div');
+    cellEl.className = 'target-cell';
+    const value = targetValues[i];
+    if (value !== 0) {
+      cellEl.textContent = String(value);
+      cellEl.classList.add('nonzero');
+    }
+    if (currentBoard && currentBoard.cells[i].value === value) {
+      cellEl.classList.add('matched');
+    }
+    el.appendChild(cellEl);
+  }
+}
+
 export function clearPreview(boardEl) {
   boardEl.querySelectorAll('.cell').forEach((el) => {
     el.classList.remove('preview-legal', 'preview-illegal');

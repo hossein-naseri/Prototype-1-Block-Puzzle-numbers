@@ -8,15 +8,19 @@ import { SeededRng } from './rng.js';
 // does past the numeric legality rules - that's entirely delegated to the
 // active variant module, which implements:
 //   init(config, rng) -> { board?, variantState, hudExtra? }        (optional)
-//   getNextHand(rng, config, variantState) -> Block[3]               (optional)
+//   getNextHand(rng, config, variantState) -> { hand: Block[], variantState } (optional;
+//       default draws a random hand and leaves variantState untouched. A
+//       variant that deals a *scripted* hand sequence - e.g. Blueprint -
+//       advances its own pointer through the returned variantState, since
+//       this is the only hook the engine calls outside onPlacementResolved.)
 //   onPlacementResolved(board, placement, variantState, config)
 //       -> { mutations, scoreDelta, events, variantState? }
 //   isGameOver(board, hand, variantState, config) -> bool
 //   getHudState(board, variantState, config) -> {}
 //   checkWin(board, variantState, config) -> bool                    (optional)
 
-function defaultNextHand(rng, config) {
-  return generateHand(rng, config, config.handSize ?? 3);
+function defaultNextHand(rng, config, variantState) {
+  return { hand: generateHand(rng, config, config.handSize ?? 3), variantState };
 }
 
 export function createGame(variant, config, seed) {
@@ -31,8 +35,12 @@ export function createGame(variant, config, seed) {
   }
 
   const nextHandFn = variant.getNextHand || defaultNextHand;
-  const hand = nextHandFn(rng, config, variantState);
-  const nextHand = nextHandFn(rng, config, variantState);
+  const first = nextHandFn(rng, config, variantState);
+  variantState = first.variantState;
+  const hand = first.hand;
+  const second = nextHandFn(rng, config, variantState);
+  variantState = second.variantState;
+  const nextHand = second.hand;
 
   return {
     variantName: variant.name,
@@ -81,7 +89,7 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
   const mutations = result.mutations || [];
   const scoreDelta = result.scoreDelta || 0;
   const events = result.events || [];
-  const variantState = result.variantState || state.variantState;
+  let variantState = result.variantState || state.variantState;
 
   const finalBoard = applyMutations(boardAfterCore, mutations);
 
@@ -90,7 +98,9 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
   const nextHandFn = variant.getNextHand || defaultNextHand;
   if (hand.length === 0) {
     hand = nextHand;
-    nextHand = nextHandFn(state.rng, state.config, variantState);
+    const drawn = nextHandFn(state.rng, state.config, variantState);
+    nextHand = drawn.hand;
+    variantState = drawn.variantState;
   }
 
   const won = variant.checkWin ? variant.checkWin(finalBoard, variantState, state.config) : false;

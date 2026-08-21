@@ -5,12 +5,14 @@ import { seedFromString, randomSeed } from '../core/rng.js';
 import {
   renderBoard,
   renderBlockGlyph,
+  renderTargetGrid,
   showPreview,
   clearPreview,
   shakeCells,
   flashCells,
 } from './renderer.js';
 import { createLogger } from './logging.js';
+import { LEVELS } from '../config/levels.js';
 
 const boardEl = document.getElementById('board');
 const handEl = document.getElementById('hand');
@@ -19,14 +21,19 @@ const scoreEl = document.getElementById('score');
 const turnsEl = document.getElementById('turns');
 const hudEl = document.getElementById('hud');
 const variantSelectEl = document.getElementById('variant-select');
+const levelSelectEl = document.getElementById('level-select');
+const seedRowEl = document.getElementById('seed-row');
 const seedInputEl = document.getElementById('seed-input');
 const seedCopyBtn = document.getElementById('seed-copy');
 const restartBtn = document.getElementById('restart-btn');
 const gameOverEl = document.getElementById('game-over');
 const exportBtn = document.getElementById('export-log');
+const targetWrapEl = document.getElementById('target-wrap');
+const targetBoardEl = document.getElementById('target-board');
 
 let variantName;
 let seed;
+let levelIndex = 0;
 let variant;
 let config;
 let state;
@@ -39,12 +46,18 @@ function readParams() {
   if (!VARIANT_NAMES.includes(variantName)) variantName = 'sandbox';
   const seedParam = params.get('seed');
   seed = seedParam ? seedFromString(seedParam) : randomSeed();
+  const levelParam = Number(params.get('level'));
+  levelIndex = Number.isInteger(levelParam) && LEVELS[levelParam] ? levelParam : 0;
 }
 
 function writeParams() {
   const params = new URLSearchParams();
   params.set('variant', variantName);
-  params.set('seed', String(seed));
+  if (variantName === 'blueprint') {
+    params.set('level', String(levelIndex));
+  } else {
+    params.set('seed', String(seed));
+  }
   history.replaceState(null, '', `?${params.toString()}`);
 }
 
@@ -57,11 +70,25 @@ function populateVariantSelect() {
     variantSelectEl.appendChild(opt);
   }
   variantSelectEl.value = variantName;
+
+  levelSelectEl.innerHTML = '';
+  LEVELS.forEach((level, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = level.name;
+    levelSelectEl.appendChild(opt);
+  });
+  levelSelectEl.value = String(levelIndex);
 }
 
 function startGame() {
+  const isBlueprint = variantName === 'blueprint';
+  levelSelectEl.hidden = !isBlueprint;
+  seedRowEl.hidden = isBlueprint;
+  targetWrapEl.hidden = !isBlueprint;
+
   variant = getVariant(variantName);
-  config = getConfig(variantName);
+  config = isBlueprint ? { ...getConfig(variantName), level: LEVELS[levelIndex] } : getConfig(variantName);
   state = createGame(variant, config, seed);
   selectedBlockId = null;
   gameOverEl.hidden = true;
@@ -84,9 +111,16 @@ function render() {
   scoreEl.textContent = String(state.score);
   turnsEl.textContent = String(state.turns);
   renderHud();
+  if (variantName === 'blueprint') {
+    renderTargetGrid(targetBoardEl, config.level.targetBoard, config.level.boardSize, state.board);
+  }
   if (state.gameOver) {
     gameOverEl.hidden = false;
-    gameOverEl.textContent = state.won ? 'Solved!' : `Game over — score ${state.score}`;
+    if (variantName === 'blueprint') {
+      gameOverEl.textContent = state.won ? `Solved in ${state.turns} (par ${config.level.par})!` : 'Out of moves';
+    } else {
+      gameOverEl.textContent = state.won ? 'Solved!' : `Game over — score ${state.score}`;
+    }
     if (logger) logger.endSession(state);
   }
 }
@@ -185,6 +219,11 @@ variantSelectEl.addEventListener('change', () => {
   startGame();
 });
 
+levelSelectEl.addEventListener('change', () => {
+  levelIndex = Number(levelSelectEl.value);
+  startGame();
+});
+
 restartBtn.addEventListener('click', () => {
   startGame();
 });
@@ -211,3 +250,15 @@ exportBtn.addEventListener('click', () => {
 readParams();
 populateVariantSelect();
 startGame();
+
+// Console dev tool: import('./core/solver.js').then(...) works too, but this
+// saves a trip - open devtools and run e.g.
+//   OperatorBlocks.solveAllLevels()
+import('../core/solver.js').then(({ solveLevel, solveAllLevels }) => {
+  window.OperatorBlocks = {
+    LEVELS,
+    solveLevel: (levelIndexArg = levelIndex) =>
+      solveLevel(getVariant('blueprint'), LEVELS[levelIndexArg], getConfig('blueprint')),
+    solveAllLevels: () => solveAllLevels(getVariant('blueprint'), LEVELS, getConfig('blueprint')),
+  };
+});
