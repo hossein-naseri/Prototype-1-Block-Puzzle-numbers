@@ -5,7 +5,7 @@ HTML/JS, no framework, no build step, deploys as a static site.
 
 ## Status
 
-Build order (see brief): core+sandbox ✅, Triple Bloom ⏳, Order Board ⏳,
+Build order (see brief): core+sandbox ✅, Triple Bloom ✅, Order Board ⏳,
 Logging ⏳, Line Level ⏳, Pressure Cooker ⏳, Blueprint+solver ⏳.
 
 ## Shared core mechanic
@@ -111,7 +111,26 @@ See `config/config.js` for the authoritative source.
 
 ## Variants
 
-### A. Triple Bloom (endless, high score) — not yet built
+### A. Triple Bloom (endless, high score) ✅
+
+- After a placement resolves, any orthogonally-connected group of
+  `minGroupSize` (default 3) or more same-value, non-zero tiles collapses:
+  one tile (the "winner") becomes `value + 1`, the rest reset to 0.
+- Winner selection: prefer a tile the player's placement (or the previous
+  cascade pass) actually just modified. If several qualify, the top-left
+  one wins (ties are rare — usually only when the block covered two cells
+  of the same eventual group). Not specified in the brief; documenting the
+  tie-break here rather than blocking on it.
+- Collapses cascade: after resolving a pass, the board is rescanned for new
+  groups (a cascade can chain when winners' new values match a neighbor).
+  Each pass increments a chain multiplier (1, 2, 3, …) applied to that
+  pass's score.
+- Score per bloom: `config.baseScorePerTier(value, groupSize)` — default
+  `value^2 * groupSize` — times the chain multiplier for that pass.
+- Game over: no legal placement exists for any block in hand. This can
+  happen early if the hand is dominated by `÷2`/`-1` cells and the board
+  doesn't yet have matching (even/non-zero) values anywhere — working as
+  specified, and exactly the kind of signal the brief is testing for.
 ### B. Order Board (endless, high score) — not yet built
 ### C. Blueprint (level-based) — not yet built
 ### D. Line Level (endless, high score) — not yet built

@@ -2,6 +2,8 @@ import assert from 'node:assert';
 import { createBoard, cellAt } from '../core/board.js';
 import { canPlace } from '../core/legality.js';
 import { applyPlacement } from '../core/resolve.js';
+import { bloom } from '../variants/bloom.js';
+import { variantConfigs } from '../config/config.js';
 
 function t(name, fn) {
   try {
@@ -77,6 +79,38 @@ t('applyPlacement mutates only the covered cells with the right op', () => {
   assert.strictEqual(cellAt(next, 0, 1).value, 1);
   assert.strictEqual(cellAt(board, 0, 0).value, 4, 'original board must not mutate');
   assert.strictEqual(changedCells.length, 2);
+});
+
+t('bloom collapses a group of 3+ equal orthogonally-connected tiles', () => {
+  const board = createBoard(4);
+  // Three 1s in an L, connected orthogonally: (0,0) (0,1) (1,1)
+  cellAt(board, 0, 0).value = 1;
+  cellAt(board, 0, 1).value = 1;
+  cellAt(board, 1, 1).value = 1; // just placed by this turn's block
+  const placement = {
+    changedCells: [{ r: 1, c: 1, op: 'plus1', prevValue: 0, value: 1 }],
+  };
+  const result = bloom.onPlacementResolved(
+    { size: 4, cells: board.cells.map((c) => ({ ...c })) },
+    placement,
+    {},
+    variantConfigs.bloom
+  );
+  const winnerMutation = result.mutations.find((m) => m.patch.value === 2);
+  assert.ok(winnerMutation, 'one tile should become value+1');
+  const zeroed = result.mutations.filter((m) => m.patch.value === 0);
+  assert.strictEqual(zeroed.length, 2, 'the other two group tiles reset to 0');
+  assert.strictEqual(result.scoreDelta, 1 * 1 * 3); // value^2 * groupSize * chain(1)
+});
+
+t('bloom does not collapse groups smaller than minGroupSize', () => {
+  const board = createBoard(4);
+  cellAt(board, 0, 0).value = 1;
+  cellAt(board, 0, 1).value = 1;
+  const placement = { changedCells: [{ r: 0, c: 1, op: 'plus1', prevValue: 0, value: 1 }] };
+  const result = bloom.onPlacementResolved(board, placement, {}, variantConfigs.bloom);
+  assert.strictEqual(result.mutations.length, 0);
+  assert.strictEqual(result.scoreDelta, 0);
 });
 
 console.log('\nsanity checks complete');
