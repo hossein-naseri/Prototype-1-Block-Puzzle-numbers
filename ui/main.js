@@ -13,6 +13,16 @@ import {
 } from './renderer.js';
 import { createLogger } from './logging.js';
 import { LEVELS } from '../config/levels.js';
+import { UNDERFLOW_RULES, UNDERFLOW_LABELS, UNDERFLOW_HELP } from '../core/ops.js';
+import {
+  loadSettings,
+  saveSettings,
+  resetSettings,
+  applySettings,
+  weightsAsPercent,
+  OPERATOR_KEYS,
+  OPERATOR_LABELS,
+} from './settings.js';
 
 const boardEl = document.getElementById('board');
 const handEl = document.getElementById('hand');
@@ -30,6 +40,13 @@ const gameOverEl = document.getElementById('game-over');
 const exportBtn = document.getElementById('export-log');
 const targetWrapEl = document.getElementById('target-wrap');
 const targetBoardEl = document.getElementById('target-board');
+const underflowSelectEl = document.getElementById('set-underflow');
+const underflowHelpEl = document.getElementById('underflow-help');
+const startValueEl = document.getElementById('set-start-value');
+const startRandomEl = document.getElementById('set-start-random');
+const maxValueEl = document.getElementById('set-max-value');
+const weightRowsEl = document.getElementById('weight-rows');
+const settingsResetEl = document.getElementById('settings-reset');
 
 let variantName;
 let seed;
@@ -38,6 +55,7 @@ let variant;
 let config;
 let state;
 let logger;
+let settings = loadSettings();
 let selectedBlockId = null;
 
 function readParams() {
@@ -88,15 +106,81 @@ function startGame() {
   targetWrapEl.hidden = !isBlueprint;
 
   variant = getVariant(variantName);
-  config = isBlueprint ? { ...getConfig(variantName), level: LEVELS[levelIndex] } : getConfig(variantName);
+  config = applySettings(getConfig(variantName), settings);
+  if (isBlueprint) {
+    // Blueprint levels are authored objects with solver-verified pars, all
+    // computed under strict legality. Letting the tuning panel change the
+    // number rules out from under them would silently invalidate every par,
+    // so levels always run strict and supply their own tile values.
+    config = { ...config, level: LEVELS[levelIndex], underflowRule: 'strict', startValue: 0 };
+  }
   state = createGame(variant, config, seed);
   selectedBlockId = null;
   gameOverEl.hidden = true;
   seedInputEl.value = String(seed);
   writeParams();
   if (logger) logger.endSession(state);
-  logger = createLogger(variantName, seed);
+  // The ruleset is recorded with the session - without it the placement
+  // data can't be interpreted, since two runs of the same seed under
+  // different underflow rules aren't comparable.
+  logger = createLogger(variantName, seed, {
+    startValue: config.startValue,
+    maxValue: config.maxValue,
+    underflowRule: config.underflowRule,
+    operatorWeights: config.operatorWeights,
+    boardSize: config.boardSize,
+    level: isBlueprint ? LEVELS[levelIndex].id : null,
+  });
   render();
+}
+
+function renderSettingsPanel() {
+  underflowSelectEl.innerHTML = '';
+  for (const rule of UNDERFLOW_RULES) {
+    const opt = document.createElement('option');
+    opt.value = rule;
+    opt.textContent = UNDERFLOW_LABELS[rule];
+    underflowSelectEl.appendChild(opt);
+  }
+  underflowSelectEl.value = settings.underflowRule;
+  underflowHelpEl.textContent = UNDERFLOW_HELP[settings.underflowRule];
+
+  const isRandom = settings.startValue === 'random';
+  startRandomEl.checked = isRandom;
+  startValueEl.disabled = isRandom;
+  startValueEl.value = isRandom ? '' : String(settings.startValue);
+  maxValueEl.value = String(settings.maxValue);
+
+  const pct = weightsAsPercent(settings.operatorWeights);
+  weightRowsEl.innerHTML = '';
+  for (const key of OPERATOR_KEYS) {
+    const row = document.createElement('label');
+    row.className = 'weight-row';
+    const label = document.createElement('span');
+    label.innerHTML = `${OPERATOR_LABELS[key]} <span class="pct">${pct[key]}%</span>`;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.step = '0.005';
+    input.value = String(settings.operatorWeights[key]);
+    input.addEventListener('change', () => {
+      const weight = Number(input.value);
+      if (!Number.isFinite(weight) || weight < 0) return;
+      settings = { ...settings, operatorWeights: { ...settings.operatorWeights, [key]: weight } };
+      commitSettings();
+    });
+    row.append(label, input);
+    weightRowsEl.appendChild(row);
+  }
+}
+
+// Every settings change restarts the run - the values it controls (start
+// tiles, weights, number rules) are all baked in at deal time, so applying
+// them mid-run would produce a board that matches neither ruleset.
+function commitSettings() {
+  saveSettings(settings);
+  renderSettingsPanel();
+  startGame();
 }
 
 function render() {
@@ -116,8 +200,11 @@ function render() {
   }
   if (state.gameOver) {
     gameOverEl.hidden = false;
+    const underflowed = state.lastEvents.some((e) => e.type === 'underflowLoss');
     if (variantName === 'blueprint') {
       gameOverEl.textContent = state.won ? `Solved in ${state.turns} (par ${config.level.par})!` : 'Out of moves';
+    } else if (underflowed) {
+      gameOverEl.textContent = `Below zero — run ended. Score ${state.score}`;
     } else {
       gameOverEl.textContent = state.won ? 'Solved!' : `Game over — score ${state.score}`;
     }
@@ -158,8 +245,8 @@ function selectBlock(blockId) {
 
 function onCellHover(r, c) {
   if (!selectedBlockId || dragging) return;
-  const { legal, absCells } = previewPlacement(state, selectedBlockId, r, c);
-  showPreview(boardEl, state.board, absCells, legal);
+  const { legal, fatal, absCells } = previewPlacement(state, selectedBlockId, r, c);
+  showPreview(boardEl, state.board, absCells, legal, fatal);
 }
 
 function onCellClick(r, c) {
@@ -247,8 +334,38 @@ exportBtn.addEventListener('click', () => {
   createLogger.exportAll();
 });
 
+underflowSelectEl.addEventListener('change', () => {
+  settings = { ...settings, underflowRule: underflowSelectEl.value };
+  commitSettings();
+});
+
+startRandomEl.addEventListener('change', () => {
+  settings = { ...settings, startValue: startRandomEl.checked ? 'random' : 0 };
+  commitSettings();
+});
+
+startValueEl.addEventListener('change', () => {
+  const value = Math.max(0, Math.floor(Number(startValueEl.value)));
+  if (!Number.isFinite(value)) return;
+  settings = { ...settings, startValue: value };
+  commitSettings();
+});
+
+maxValueEl.addEventListener('change', () => {
+  const value = Math.max(1, Math.floor(Number(maxValueEl.value)));
+  if (!Number.isFinite(value)) return;
+  settings = { ...settings, maxValue: value };
+  commitSettings();
+});
+
+settingsResetEl.addEventListener('click', () => {
+  settings = resetSettings();
+  commitSettings();
+});
+
 readParams();
 populateVariantSelect();
+renderSettingsPanel();
 startGame();
 
 // Console dev tool: import('./core/solver.js').then(...) works too, but this

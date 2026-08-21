@@ -84,16 +84,17 @@ export function renderTargetGrid(el, targetValues, boardSize, currentBoard) {
 
 export function clearPreview(boardEl) {
   boardEl.querySelectorAll('.cell').forEach((el) => {
-    el.classList.remove('preview-legal', 'preview-illegal');
+    el.classList.remove('preview-legal', 'preview-illegal', 'preview-fatal');
   });
 }
 
-export function showPreview(boardEl, board, absCells, legal) {
+export function showPreview(boardEl, board, absCells, legal, fatal = false) {
   clearPreview(boardEl);
+  const cls = !legal ? 'preview-illegal' : fatal ? 'preview-fatal' : 'preview-legal';
   for (const { r, c } of absCells) {
     if (r < 0 || c < 0 || r >= board.size || c >= board.size) continue;
     const el = boardEl.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
-    if (el) el.classList.add(legal ? 'preview-legal' : 'preview-illegal');
+    if (el) el.classList.add(cls);
   }
 }
 

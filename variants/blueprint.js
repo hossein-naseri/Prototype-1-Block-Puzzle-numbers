@@ -35,7 +35,7 @@ export const blueprint = {
 
   isGameOver(board, hand, variantState, config) {
     if (hand.length === 0) return true;
-    return noLegalPlacements(board, hand, absoluteCells);
+    return noLegalPlacements(board, hand, absoluteCells, config.underflowRule);
   },
 
   getHudState(board, variantState, config) {

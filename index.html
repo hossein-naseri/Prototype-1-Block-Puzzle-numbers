@@ -18,6 +18,39 @@
   <button id="restart-btn" type="button">Restart</button>
 </header>
 
+<details id="settings-panel">
+  <summary>Settings</summary>
+  <div class="settings-body">
+    <label class="setting">
+      <span>Below-zero rule</span>
+      <select id="set-underflow"></select>
+    </label>
+    <p id="underflow-help" class="setting-help"></p>
+
+    <label class="setting">
+      <span>Starting tile value</span>
+      <span class="setting-inline">
+        <input id="set-start-value" type="number" min="0" step="1" />
+        <label class="checkbox"><input id="set-start-random" type="checkbox" /> Random</label>
+      </span>
+    </label>
+
+    <label class="setting">
+      <span>Max value <small>(Pressure Cooker cap; random start ceiling)</small></span>
+      <input id="set-max-value" type="number" min="1" step="1" />
+    </label>
+
+    <fieldset class="setting weights">
+      <legend>Operator weights <small>(relative; normalized automatically)</small></legend>
+      <div id="weight-rows"></div>
+    </fieldset>
+
+    <div class="settings-actions">
+      <button id="settings-reset" type="button">Reset to defaults</button>
+    </div>
+  </div>
+</details>
+
 <div id="hud"></div>
 
 <main id="play-area">

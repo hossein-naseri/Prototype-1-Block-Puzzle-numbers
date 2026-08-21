@@ -11,8 +11,9 @@ five variants plus sandbox are built.
 
 ## Shared core mechanic
 
-- Square grid of tiles, each holding an integer ≥ 0, starting at 0.
-  Board size is a config value (`config.boardSize`, default **4**).
+- Square grid of tiles, each holding an integer ≥ 0. Board size is a config
+  value (`config.boardSize`, default **4**). Tiles start at 0 by default;
+  the starting value is tunable live (including a per-tile random option).
 - Each turn the player is offered a hand of 3 blocks (`config.handSize`).
   A block is one of the shapes in `core/shapes.js` — 6 orthogonally-connected
   trominoes (I horizontal/vertical, 4 L rotations), 2 diagonal-connected
@@ -31,18 +32,64 @@ five variants plus sandbox are built.
   always shown as a preview so the player can plan the whole 3-block cycle,
   not just the immediate pick.
 
-### Placement legality (strict)
+### Placement legality
 
 A block placement is legal only if **every** covered cell is legal:
 
 - The whole block must fit inside the board.
-- `-1` cannot take a tile below 0.
-- `÷2` requires an even, non-zero value.
+- `÷2` requires an even value (a fractional tile isn't representable under
+  any rule, so this one never relaxes).
+- What happens at the **bottom** of the range is a swappable rule — see
+  below.
 - Any cell failing its check fails the entire placement (no partial apply).
+
+### Below-zero rule (4 options, switchable live)
+
+The original strict rule made both `-1` and `÷2` illegal on an all-zero
+board, which meant **26.5% of seeds dealt an unplayable opening hand**
+(measured over 20,000 seeds). Rather than pick one fix, the prototype ships
+four testable answers, selectable from the in-page Settings panel and
+recorded with every logged session:
+
+| id | rule | behavior |
+|---|---|---|
+| a | `strict` | Below 0 is impossible: `-1` on 0 and `÷2` on 0 are both illegal placements. **Dead hands are re-rolled** so a deal always has at least one legal move. |
+| b | `instaLoss` | `-1` on 0 is a legal placement. Making it drives the tile below 0 and immediately ends the run. The UI previews such placements in amber with a dashed outline, so the choice is visible before it's committed. |
+| c | `clamp` | `-1` on 0 is legal; the tile simply floors at 0. |
+| d | `deadAtZero` | As (c), plus any tile driven from a positive value down to exactly 0 becomes a permanently dead cell — the same fate as exceeding `maxValue` in Pressure Cooker. |
+
+Notes on the interpretation, since the brief left room:
+
+- Under (b), (c) and (d), `÷2` on 0 also becomes legal (`0 ÷ 2 = 0`, a
+  harmless no-op). Without this, `÷2` blocks would *still* be dead on an
+  empty board and (b)/(c) wouldn't actually fix the opening.
+- Under (d), "reaching 0" means arriving at 0 **from a positive value**. A
+  tile that was already 0 is untouched — otherwise a fresh all-zero board
+  would be entirely dead before the first move. Pair (d) with a non-zero
+  starting tile value for it to be interesting.
+- (d) applies only to tiles an *operator* touched. A variant zeroing a tile
+  itself (a Bloom collapse, a Line Level clear) is not "reaching 0" in this
+  sense and never kills.
+- Blueprint always runs `strict` with its own authored tile values,
+  regardless of the panel. Its levels are designed objects whose pars are
+  solver-verified under strict legality; letting the panel change the number
+  rules underneath them would silently invalidate every par.
+
+**Dead-hand re-rolling** (active under `strict`, harmless elsewhere): a hand
+with no legal placement anywhere is re-drawn, up to 40 attempts. This is
+what removes the 26.5% dead-opening rate — verified at 0 dead openings over
+800 seeds. It carries one cost worth knowing when comparing seeds: a re-roll
+depends on the board, and boards diverge between variants once their rules
+start firing, so a seed stops guaranteeing an identical block sequence
+across variants from the first re-roll onward. The **opening deal is
+unaffected** — every variant starts from the same board, so it re-rolls
+identically.
 
 Illegal placements are rejected with a shake animation and never mutate
 state. Legality is previewed live: hovering (mouse) or dragging (touch)
-colors the target cells green (legal) or red (illegal) before commit.
+colors the target cells green (legal) or red (illegal) before commit —
+plus amber with a dashed outline for the `instaLoss` case, where a
+placement is legal but would end the run.
 
 ### Generic per-cell flags (core, variant-agnostic)
 
@@ -80,7 +127,9 @@ Core never imports a variant. The variant interface (see `core/engine.js`):
 {
   name: 'variantName',
   init(config, rng) -> { board?, variantState }        // optional
-  getNextHand(rng, config, variantState) -> Block[3]   // optional, default = random hand
+  getNextHand(rng, config, variantState)               // optional, default = random hand
+      -> { hand: Block[], variantState }               //   (scripted variants advance their
+                                                       //    own pointer via variantState)
   onPlacementResolved(board, placement, variantState, config)
       -> { mutations, scoreDelta, events, variantState? }
   isGameOver(board, hand, variantState, config) -> bool
@@ -103,13 +152,38 @@ See `config/config.js` for the authoritative source.
 |---|---|---|
 | `boardSize` | 4 | grid is `boardSize × boardSize` |
 | `handSize` | 3 | blocks offered per hand |
-| `operatorWeights` | none .55 / +1 .18 / -1 .18 / ×2 .045 / ÷2 .045 | per-cell operator draw |
+| `startValue` | 0 | **tunable** — value every tile starts at, or `'random'` |
+| `maxValue` | 12 | **tunable** — top of the range; Pressure Cooker's cap, and the ceiling for random start values |
+| `underflowRule` | `'strict'` | **tunable** — one of `strict` / `instaLoss` / `clamp` / `deadAtZero` |
+| `operatorWeights` | none .55 / +1 .18 / -1 .18 / ×2 .045 / ÷2 .045 | **tunable** — per-cell operator draw |
 | `bloom.minGroupSize` | 3 | tiles needed to collapse |
 | `orderBoard.startTarget` | 3 | starting target number |
 | `orderBoard.incrementEvery` | 5 | banks per target increment |
-| `lineLevel.lineScoreMultiplier` | 1 | score = value × boardSize × multiplier |
-| `pressure.cap` | 12 | value above which a tile dies |
 | `orderBoard.bankScorePerTarget` | 10 | score per bank = this × current target |
+| `lineLevel.lineScoreMultiplier` | 1 | score = value × boardSize × multiplier |
+
+### Live tuning panel
+
+The four **tunable** rows above are editable by the playtester from the
+Settings panel in the page — no code edit, no redeploy:
+
+- **Below-zero rule** — the four options above, with inline help text.
+- **Starting tile value** — any integer, or a *Random* checkbox that gives
+  each tile its own value strictly between 0 and `maxValue` (both ends
+  excluded, so no tile starts already at zero or already dead).
+- **Max value** — Pressure Cooker's death cap, and the ceiling for random
+  start values.
+- **Operator weights** — one box per operator (`Blank`, `+1`, `-1`, `×2`,
+  `÷2`), shown with their live normalized percentage. They don't have to sum
+  to anything; the RNG normalizes. Degenerate tables (all zero, or every
+  non-blank at zero) fall back to defaults rather than hanging block
+  generation.
+
+Settings persist in `localStorage` and **restart the run on change** — the
+values they control are all baked in at deal time, so applying them mid-run
+would produce a board matching neither ruleset. Every logged session records
+the ruleset it was played under (see Logging), since two runs of the same
+seed under different rules aren't comparable.
 
 ## Variants
 
@@ -192,8 +266,8 @@ See `config/config.js` for the authoritative source.
   far more than a row of 1s.
 ### E. Pressure Cooker (survival) ✅
 
-- Tiles have a hard cap (`pressure.cap`, default 12). A tile pushed above
-  the cap becomes a **dead cell**: `blocked: true` via the core's generic
+- Tiles have a hard cap (`maxValue`, default 12, editable live in the
+  Settings panel). A tile pushed above the cap becomes a **dead cell**: `blocked: true` via the core's generic
   flag, so it fails every op (including `none`) forever — the board
   effectively shrinks as dead cells accumulate.
 - Score = turns survived (`scoreDelta = 1` per successful placement, so the
@@ -220,6 +294,10 @@ Per session:
 
 - `variant`, `seed`, `startedAt`/`endedAt`/`sessionLengthMs`, `finalScore`,
   `turnsSurvived`.
+- `ruleset`: the tunables this run was played under — `underflowRule`,
+  `startValue`, `maxValue`, `operatorWeights`, `boardSize`, and the Blueprint
+  level id if any. Without this the placement data is uninterpretable, since
+  the same seed under two different below-zero rules is two different games.
 - `placements[]`: one entry per successful placement — `offeredHand` (the
   full 3-block hand, each block's shape and per-cell operator composition,
   captured *before* this placement so you can see what was passed over),

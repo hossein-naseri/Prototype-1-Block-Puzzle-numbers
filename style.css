@@ -49,6 +49,113 @@ body {
 #seed-row { display: flex; gap: 0.3rem; flex: 1; min-width: 140px; }
 #seed-input { width: 100%; min-width: 0; }
 
+#settings-panel {
+  background: var(--panel);
+  border-top: 1px solid #2a3040;
+  font-size: 0.9rem;
+}
+
+#settings-panel > summary {
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+}
+
+.settings-body {
+  padding: 0.25rem 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.setting > span:first-child, .weights legend {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.setting small { opacity: 0.7; font-weight: 400; }
+
+.setting input[type="number"], .setting select {
+  background: var(--cell);
+  color: var(--text);
+  border: 1px solid #333a4d;
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.95rem;
+  width: 100%;
+}
+
+.setting-inline {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.setting-inline input[type="number"] { flex: 1; }
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.setting-help {
+  margin: -0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.weights {
+  border: 1px solid #2a3040;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem 0.6rem;
+  margin: 0;
+}
+
+#weight-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.weight-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.weight-row span {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.weight-row .pct { color: var(--accent); }
+
+.settings-actions { display: flex; }
+
+#settings-reset {
+  background: var(--cell);
+  color: var(--text);
+  border: 1px solid #333a4d;
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.85rem;
+}
+
 #hud {
   text-align: center;
   padding: 0.4rem;
@@ -133,6 +240,11 @@ body {
 
 .cell.preview-legal { background: color-mix(in srgb, var(--legal) 45%, var(--cell)); }
 .cell.preview-illegal { background: color-mix(in srgb, var(--illegal) 45%, var(--cell)); }
+/* Legal, but it would drive a tile below 0 and end the run (rule b). */
+.cell.preview-fatal {
+  background: color-mix(in srgb, var(--locked) 55%, var(--cell));
+  outline: 2px dashed var(--illegal);
+}
 
 .cell.shake { animation: shake 0.3s; }
 .cell.flash { animation: flash 0.4s; }

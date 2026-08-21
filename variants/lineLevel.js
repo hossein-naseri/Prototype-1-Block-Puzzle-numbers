@@ -34,8 +34,8 @@ export const lineLevel = {
     return { mutations, scoreDelta, events };
   },
 
-  isGameOver(board, hand) {
-    return noLegalPlacements(board, hand, absoluteCells);
+  isGameOver(board, hand, variantState, config) {
+    return noLegalPlacements(board, hand, absoluteCells, config.underflowRule);
   },
 
   getHudState() {

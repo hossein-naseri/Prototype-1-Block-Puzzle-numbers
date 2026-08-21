@@ -20,12 +20,12 @@ export const pressure = {
   name: 'pressure',
 
   onPlacementResolved(board, placement, variantState, config) {
-    const { mutations, events } = deadCellMutations(board, placement.changedCells, config.cap);
+    const { mutations, events } = deadCellMutations(board, placement.changedCells, config.maxValue);
     return { mutations, scoreDelta: 1, events };
   },
 
-  isGameOver(board, hand) {
-    return noLegalPlacements(board, hand, absoluteCells);
+  isGameOver(board, hand, variantState, config) {
+    return noLegalPlacements(board, hand, absoluteCells, config.underflowRule);
   },
 
   getHudState(board, variantState, config) {
@@ -33,7 +33,7 @@ export const pressure = {
     forEachCell(board, (r, c, cell) => {
       if (cell.blocked) dead += 1;
     });
-    return { Cap: config.cap, Dead: dead };
+    return { Max: config.maxValue, Dead: dead };
   },
 };
 
@@ -64,7 +64,7 @@ export function withPressure(baseVariant, cap) {
     isGameOver(board, hand, variantState, config) {
       return baseVariant.isGameOver
         ? baseVariant.isGameOver(board, hand, variantState, config)
-        : noLegalPlacements(board, hand, absoluteCells);
+        : noLegalPlacements(board, hand, absoluteCells, config.underflowRule);
     },
     getHudState(board, variantState, config) {
       const base = baseVariant.getHudState ? baseVariant.getHudState(board, variantState, config) : {};
@@ -72,7 +72,7 @@ export function withPressure(baseVariant, cap) {
       forEachCell(board, (r, c, cell) => {
         if (cell.blocked) dead += 1;
       });
-      return { ...base, Cap: cap, Dead: dead };
+      return { ...base, Max: cap, Dead: dead };
     },
     checkWin: baseVariant.checkWin,
   };

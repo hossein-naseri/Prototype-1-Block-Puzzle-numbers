@@ -9,8 +9,8 @@ export const sandbox = {
     return { mutations: [], scoreDelta: 0, events: [] };
   },
 
-  isGameOver(board, hand) {
-    return noLegalPlacements(board, hand, absoluteCells);
+  isGameOver(board, hand, variantState, config) {
+    return noLegalPlacements(board, hand, absoluteCells, config.underflowRule);
   },
 
   getHudState() {
