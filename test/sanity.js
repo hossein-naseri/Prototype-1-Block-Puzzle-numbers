@@ -5,6 +5,7 @@ import { applyPlacement } from '../core/resolve.js';
 import { bloom } from '../variants/bloom.js';
 import { orderBoard } from '../variants/orderBoard.js';
 import { lineLevel } from '../variants/lineLevel.js';
+import { pressure } from '../variants/pressure.js';
 import { variantConfigs } from '../config/config.js';
 
 function t(name, fn) {
@@ -165,6 +166,19 @@ t('line level does not clear a row that is not fully uniform', () => {
   const placement = { changedCells: [{ r: 1, c: 3, op: 'plus1', prevValue: 4, value: 5 }] };
   const result = lineLevel.onPlacementResolved(board, placement, {}, variantConfigs.lineLevel);
   assert.strictEqual(result.mutations.length, 0);
+});
+
+t('pressure cooker turns a tile above the cap into a permanent dead cell', () => {
+  const board = createBoard(4);
+  cellAt(board, 2, 2).value = 13; // just pushed over the default cap of 12
+  const placement = { changedCells: [{ r: 2, c: 2, op: 'plus1', prevValue: 12, value: 13 }] };
+  const result = pressure.onPlacementResolved(board, placement, {}, variantConfigs.pressure);
+  const deadMutation = result.mutations.find((m) => m.r === 2 && m.c === 2);
+  assert.strictEqual(deadMutation.patch.blocked, true);
+  assert.strictEqual(canPlace(board, [{ r: 2, c: 2, op: 'none' }]), true, 'not yet blocked in this snapshot');
+  const nextBoard = { size: 4, cells: board.cells.map((c) => ({ ...c })) };
+  cellAt(nextBoard, 2, 2).blocked = true;
+  assert.strictEqual(canPlace(nextBoard, [{ r: 2, c: 2, op: 'none' }]), false, 'blocked once mutation applied');
 });
 
 console.log('\nsanity checks complete');

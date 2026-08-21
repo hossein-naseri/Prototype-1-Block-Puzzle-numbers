@@ -6,7 +6,7 @@ HTML/JS, no framework, no build step, deploys as a static site.
 ## Status
 
 Build order (see brief): core+sandbox ✅, Triple Bloom ✅, Order Board ✅,
-Logging ✅, Line Level ✅, Pressure Cooker ⏳, Blueprint+solver ⏳.
+Logging ✅, Line Level ✅, Pressure Cooker ✅, Blueprint+solver ⏳.
 
 ## Shared core mechanic
 
@@ -108,6 +108,7 @@ See `config/config.js` for the authoritative source.
 | `orderBoard.incrementEvery` | 5 | banks per target increment |
 | `lineLevel.lineScoreMultiplier` | 1 | score = value × boardSize × multiplier |
 | `pressure.cap` | 12 | value above which a tile dies |
+| `orderBoard.bankScorePerTarget` | 10 | score per bank = this × current target |
 
 ## Variants
 
@@ -158,7 +159,20 @@ See `config/config.js` for the authoritative source.
 - Score: `value * boardSize * lineScoreMultiplier` per cleared line
   (default multiplier 1), so a full row of 6s on a 4×4 board scores 24 —
   far more than a row of 1s.
-### E. Pressure Cooker (survival) — not yet built
+### E. Pressure Cooker (survival) ✅
+
+- Tiles have a hard cap (`pressure.cap`, default 12). A tile pushed above
+  the cap becomes a **dead cell**: `blocked: true` via the core's generic
+  flag, so it fails every op (including `none`) forever — the board
+  effectively shrinks as dead cells accumulate.
+- Score = turns survived (`scoreDelta = 1` per successful placement, so the
+  score stat and turn counter track together).
+- Shipped as its own standalone selectable variant, matching the brief's
+  "score = turns survived" spec exactly. It's also exported as a
+  composable `withPressure(baseVariant, cap)` wrapper (see
+  `variants/pressure.js`) for layering the cap/dead-cell rule on top of
+  another variant's own scoring — not wired into the variant selector in
+  v1, but there if a later playtest wants e.g. Bloom-under-pressure.
 
 Each section will be filled in as its variant lands, with the exact rule
 and any decisions made along the way.
