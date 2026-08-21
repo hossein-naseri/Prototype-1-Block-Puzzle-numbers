@@ -1,7 +1,9 @@
 import assert from 'node:assert';
 import { createBoard, cellAt } from '../core/board.js';
-import { canPlace } from '../core/legality.js';
+import { canPlace, anyPlacementForBlock } from '../core/legality.js';
 import { applyPlacement } from '../core/resolve.js';
+import { createGame, absoluteCells } from '../core/engine.js';
+import { sandbox } from '../variants/sandbox.js';
 import { bloom } from '../variants/bloom.js';
 import { orderBoard } from '../variants/orderBoard.js';
 import { lineLevel } from '../variants/lineLevel.js';
@@ -201,6 +203,80 @@ t('every authored Blueprint level is solvable at its authored par', () => {
     assert.ok(result.solvable, `${level.id} should be solvable`);
     assert.strictEqual(result.par, level.par, `${level.id} par mismatch`);
   }
+});
+
+t('underflow (a) strict: -1 on 0 illegal, div2 on 0 illegal', () => {
+  const board = createBoard(4);
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }], 'strict'), false);
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }], 'strict'), false);
+});
+
+t('underflow (b) instaLoss: -1 on 0 is legal and drives the tile negative', () => {
+  const board = createBoard(4);
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }], 'instaLoss'), true);
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'instaLoss');
+  assert.strictEqual(cellAt(next, 0, 0).value, -1);
+});
+
+t('underflow (c) clamp: -1 on 0 is legal and floors at 0', () => {
+  const board = createBoard(4);
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }], 'clamp'), true);
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'clamp');
+  assert.strictEqual(cellAt(next, 0, 0).value, 0);
+  assert.strictEqual(cellAt(next, 0, 0).blocked, false);
+});
+
+t('underflow (d) deadAtZero: reaching 0 from positive kills the tile', () => {
+  const board = createBoard(4);
+  cellAt(board, 0, 0).value = 1;
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'deadAtZero');
+  assert.strictEqual(cellAt(next, 0, 0).value, 0);
+  assert.strictEqual(cellAt(next, 0, 0).blocked, true);
+});
+
+t('underflow (d) does not kill a tile that was already 0', () => {
+  const board = createBoard(4);
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'deadAtZero');
+  assert.strictEqual(cellAt(next, 0, 0).blocked, false, 'an all-zero starting board must survive');
+});
+
+t('div2 still requires an even value under every rule', () => {
+  const board = createBoard(4);
+  cellAt(board, 0, 0).value = 3;
+  for (const rule of ['strict', 'instaLoss', 'clamp', 'deadAtZero']) {
+    assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }], rule), false, rule);
+  }
+});
+
+t('the seed that dealt a dead opening hand is now playable under strict', () => {
+  // 3990774553 dealt three -1-carrying blocks onto an empty board.
+  const game = createGame(sandbox, { ...variantConfigs.sandbox }, 3990774553);
+  assert.strictEqual(game.gameOver, false, 'opening deal must be playable');
+  assert.ok(
+    game.hand.some((b) => anyPlacementForBlock(game.board, b, absoluteCells, 'strict') !== null)
+  );
+});
+
+t('no seed deals a dead opening hand under strict any more', () => {
+  let dead = 0;
+  for (let s = 1; s <= 800; s++) {
+    const game = createGame(sandbox, { ...variantConfigs.sandbox }, s * 7919);
+    if (game.gameOver) dead++;
+  }
+  assert.strictEqual(dead, 0, `${dead} dead openings still present`);
+});
+
+t('startValue seeds every tile, and random stays strictly inside 0..maxValue', () => {
+  const fixed = createGame(sandbox, { ...variantConfigs.sandbox, startValue: 6 }, 42);
+  assert.ok(fixed.board.cells.every((c) => c.value === 6));
+
+  const random = createGame(
+    sandbox,
+    { ...variantConfigs.sandbox, startValue: 'random', maxValue: 12 },
+    42
+  );
+  assert.ok(random.board.cells.every((c) => c.value > 0 && c.value < 12));
+  assert.ok(new Set(random.board.cells.map((c) => c.value)).size > 1, 'tiles should vary');
 });
 
 console.log('\nsanity checks complete');

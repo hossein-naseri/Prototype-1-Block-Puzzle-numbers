@@ -24,10 +24,14 @@ function handComposition(hand) {
   }));
 }
 
-export function createLogger(variantName, seed) {
+export function createLogger(variantName, seed, ruleset = null) {
   const session = {
     variant: variantName,
     seed,
+    // Snapshot of the tunables this run was played under. Two runs of the
+    // same seed under different rulesets aren't comparable, so the data is
+    // uninterpretable without this.
+    ruleset,
     startedAt: Date.now(),
     endedAt: null,
     finalScore: 0,
