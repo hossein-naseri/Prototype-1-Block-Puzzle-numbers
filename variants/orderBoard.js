@@ -4,6 +4,9 @@ import { cellAt } from '../core/board.js';
 
 const STONE_OPS = new Set(['minus1', 'div2']);
 
+// A tile landing exactly on the target scores at its own value and resets
+// to 0. A tile above the target locks into a stone that only -1 and ÷2 may
+// touch, until it comes back down.
 export const orderBoard = {
   name: 'orderBoard',
 
@@ -15,7 +18,7 @@ export const orderBoard = {
     let { target, banks } = variantState;
     const mutations = [];
     const events = [];
-    let scoreDelta = 0;
+    const scoredTiles = [];
 
     for (const changed of placement.changedCells) {
       if (changed.prevValue === changed.value) continue; // 'none' op, nothing moved
@@ -24,8 +27,8 @@ export const orderBoard = {
 
       if (value === target) {
         mutations.push({ r, c, patch: { value: 0, allowedOps: null } });
+        scoredTiles.push({ r, c, value });
         banks += 1;
-        scoreDelta += config.bankScorePerTarget * target;
         events.push({ type: 'bank', r, c, target });
         if (banks % config.incrementEvery === 0) {
           target += 1;
@@ -41,11 +44,11 @@ export const orderBoard = {
       }
     }
 
-    return { mutations, scoreDelta, events, variantState: { target, banks } };
+    return { mutations, scoredTiles, events, variantState: { target, banks } };
   },
 
-  isGameOver(board, hand, variantState, config) {
-    return noLegalPlacements(board, hand, absoluteCells, config.underflowRule);
+  isGameOver(board, hand) {
+    return noLegalPlacements(board, hand, absoluteCells);
   },
 
   getHudState(board, variantState) {

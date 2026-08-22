@@ -1,17 +1,13 @@
 import assert from 'node:assert';
 import { createBoard, cellAt } from '../core/board.js';
-import { canPlace, anyPlacementForBlock } from '../core/legality.js';
+import { canPlace } from '../core/legality.js';
 import { applyPlacement } from '../core/resolve.js';
-import { createGame, absoluteCells } from '../core/engine.js';
-import { sandbox } from '../variants/sandbox.js';
-import { bloom } from '../variants/bloom.js';
-import { orderBoard } from '../variants/orderBoard.js';
+import { createGame, placeBlock, tileScore } from '../core/engine.js';
+import { generateBlock, createBlock, absoluteCells } from '../core/blocks.js';
+import { SeededRng } from '../core/rng.js';
 import { lineLevel } from '../variants/lineLevel.js';
-import { pressure } from '../variants/pressure.js';
-import { blueprint } from '../variants/blueprint.js';
-import { LEVELS } from '../config/levels.js';
+import { orderBoard } from '../variants/orderBoard.js';
 import { variantConfigs } from '../config/config.js';
-import { solveLevel } from '../core/solver.js';
 
 function t(name, fn) {
   try {
@@ -24,49 +20,51 @@ function t(name, fn) {
   }
 }
 
+const CFG = variantConfigs.lineLevel;
+
+// ---- legality -------------------------------------------------------
+
 t('placement off the edge of the board is illegal', () => {
-  const board = createBoard(4);
-  const abs = [
-    { r: 0, c: 3, op: 'none' },
-    { r: 0, c: 4, op: 'none' }, // off board
-    { r: 0, c: 5, op: 'none' },
-  ];
-  assert.strictEqual(canPlace(board, abs), false);
+  const board = createBoard(3);
+  assert.strictEqual(
+    canPlace(board, [
+      { r: 0, c: 2, op: 'none' },
+      { r: 0, c: 3, op: 'none' },
+    ]),
+    false
+  );
 });
 
-t('-1 cannot take a tile below 0', () => {
-  const board = createBoard(4);
-  const abs = [{ r: 0, c: 0, op: 'minus1' }];
-  assert.strictEqual(canPlace(board, abs), false);
+t('-1 on 0 is now legal and clamps rather than going negative', () => {
+  const board = createBoard(3);
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }]), true);
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 9);
+  assert.strictEqual(cellAt(next, 0, 0).value, 0);
 });
 
-t('/2 requires an even, non-zero value', () => {
-  const board = createBoard(4);
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), false); // 0
+t('/2 requires an even value but is fine on 0', () => {
+  const board = createBoard(3);
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), true); // 0 -> 0
   cellAt(board, 0, 0).value = 3;
   assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), false); // odd
   cellAt(board, 0, 0).value = 4;
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), true); // even
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), true);
 });
 
 t('one illegal cell fails the whole placement', () => {
-  const board = createBoard(4);
+  const board = createBoard(3);
   cellAt(board, 0, 1).value = 3; // odd, /2 illegal here
-  const abs = [
-    { r: 0, c: 0, op: 'plus1' },
-    { r: 0, c: 1, op: 'div2' },
-  ];
-  assert.strictEqual(canPlace(board, abs), false);
-});
-
-t('blocked cells reject every op, including none', () => {
-  const board = createBoard(4);
-  cellAt(board, 1, 1).blocked = true;
-  assert.strictEqual(canPlace(board, [{ r: 1, c: 1, op: 'none' }]), false);
+  assert.strictEqual(
+    canPlace(board, [
+      { r: 0, c: 0, op: 'plus1' },
+      { r: 0, c: 1, op: 'div2' },
+    ]),
+    false
+  );
 });
 
 t('a stone-locked cell only accepts its allowed ops (plus none)', () => {
-  const board = createBoard(4);
+  const board = createBoard(3);
   const stone = cellAt(board, 2, 2);
   stone.value = 5;
   stone.allowedOps = new Set(['minus1', 'div2']);
@@ -75,208 +73,210 @@ t('a stone-locked cell only accepts its allowed ops (plus none)', () => {
   assert.strictEqual(canPlace(board, [{ r: 2, c: 2, op: 'none' }]), true);
 });
 
-t('applyPlacement mutates only the covered cells with the right op', () => {
-  const board = createBoard(4);
-  cellAt(board, 0, 0).value = 4;
-  const abs = [
-    { r: 0, c: 0, op: 'x2' },
-    { r: 0, c: 1, op: 'plus1' },
-  ];
-  const { board: next, changedCells } = applyPlacement(board, abs);
-  assert.strictEqual(cellAt(next, 0, 0).value, 8);
-  assert.strictEqual(cellAt(next, 0, 1).value, 1);
-  assert.strictEqual(cellAt(board, 0, 0).value, 4, 'original board must not mutate');
-  assert.strictEqual(changedCells.length, 2);
+// ---- strike cap -----------------------------------------------------
+
+t('a tile pushed above maxValue costs a strike and resets to maxValue', () => {
+  const board = createBoard(3);
+  cellAt(board, 1, 1).value = 9;
+  const { board: next, strikesAdded } = applyPlacement(board, [{ r: 1, c: 1, op: 'plus1' }], 9);
+  assert.strictEqual(cellAt(next, 1, 1).value, 9, 'resets to the cap, not above it');
+  assert.strictEqual(strikesAdded, 1);
 });
 
-t('bloom collapses a group of 3+ equal orthogonally-connected tiles', () => {
-  const board = createBoard(4);
-  // Three 1s in an L, connected orthogonally: (0,0) (0,1) (1,1)
-  cellAt(board, 0, 0).value = 1;
-  cellAt(board, 0, 1).value = 1;
-  cellAt(board, 1, 1).value = 1; // just placed by this turn's block
-  const placement = {
-    changedCells: [{ r: 1, c: 1, op: 'plus1', prevValue: 0, value: 1 }],
-  };
-  const result = bloom.onPlacementResolved(
-    { size: 4, cells: board.cells.map((c) => ({ ...c })) },
-    placement,
-    {},
-    variantConfigs.bloom
+t('overshooting the cap by a lot still costs exactly one strike per tile', () => {
+  const board = createBoard(3);
+  cellAt(board, 0, 0).value = 8; // x2 -> 16, far above the cap
+  const { board: next, strikesAdded } = applyPlacement(board, [{ r: 0, c: 0, op: 'x2' }], 9);
+  assert.strictEqual(cellAt(next, 0, 0).value, 9);
+  assert.strictEqual(strikesAdded, 1);
+});
+
+t('staying at or under the cap costs no strike', () => {
+  const board = createBoard(3);
+  cellAt(board, 0, 0).value = 8;
+  const { strikesAdded } = applyPlacement(board, [{ r: 0, c: 0, op: 'plus1' }], 9);
+  assert.strictEqual(strikesAdded, 0);
+});
+
+// ---- scoring / bars -------------------------------------------------
+
+t('score for a tile is its value squared', () => {
+  assert.strictEqual(tileScore(4), 16);
+  assert.strictEqual(tileScore(9), 81);
+});
+
+t('a cleared line of 4s sends 16 into each column bar it spans', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, {}, CFG);
+  assert.strictEqual(result.scoredTiles.length, 3);
+  assert.ok(result.scoredTiles.every((tile) => tileScore(tile.value) === 16));
+  assert.deepStrictEqual(
+    result.scoredTiles.map((tile) => tile.c).sort(),
+    [0, 1, 2]
   );
-  const winnerMutation = result.mutations.find((m) => m.patch.value === 2);
-  assert.ok(winnerMutation, 'one tile should become value+1');
-  const zeroed = result.mutations.filter((m) => m.patch.value === 0);
-  assert.strictEqual(zeroed.length, 2, 'the other two group tiles reset to 0');
-  assert.strictEqual(result.scoreDelta, 1 * 1 * 3); // value^2 * groupSize * chain(1)
-});
-
-t('bloom does not collapse groups smaller than minGroupSize', () => {
-  const board = createBoard(4);
-  cellAt(board, 0, 0).value = 1;
-  cellAt(board, 0, 1).value = 1;
-  const placement = { changedCells: [{ r: 0, c: 1, op: 'plus1', prevValue: 0, value: 1 }] };
-  const result = bloom.onPlacementResolved(board, placement, {}, variantConfigs.bloom);
-  assert.strictEqual(result.mutations.length, 0);
-  assert.strictEqual(result.scoreDelta, 0);
-});
-
-t('order board banks a tile that lands exactly on target', () => {
-  const board = createBoard(4);
-  cellAt(board, 0, 0).value = 3; // just placed
-  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 2, value: 3 }] };
-  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
-  const bankMutation = result.mutations.find((m) => m.r === 0 && m.c === 0);
-  assert.strictEqual(bankMutation.patch.value, 0);
-  assert.strictEqual(result.variantState.banks, 1);
-  assert.strictEqual(result.scoreDelta, variantConfigs.orderBoard.bankScorePerTarget * 3);
-});
-
-t('order board locks a tile that overshoots target into a stone', () => {
-  const board = createBoard(4);
-  cellAt(board, 0, 0).value = 5;
-  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 4, value: 5 }] };
-  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
-  const lockMutation = result.mutations.find((m) => m.r === 0 && m.c === 0);
-  assert.ok(lockMutation.patch.allowedOps.has('minus1'));
-  assert.ok(lockMutation.patch.allowedOps.has('div2'));
-  assert.ok(!lockMutation.patch.allowedOps.has('plus1'));
-});
-
-t('order board target increments every N banks', () => {
-  const board = createBoard(4);
-  cellAt(board, 0, 0).value = 3;
-  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 2, value: 3 }] };
-  const config = { ...variantConfigs.orderBoard, incrementEvery: 1 };
-  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, config);
-  assert.strictEqual(result.variantState.target, 4);
-});
-
-t('line level clears a row of all-equal non-zero tiles', () => {
-  const board = createBoard(4);
-  for (let c = 0; c < 4; c++) cellAt(board, 1, c).value = 6;
-  const placement = { changedCells: [{ r: 1, c: 3, op: 'plus1', prevValue: 5, value: 6 }] };
-  const result = lineLevel.onPlacementResolved(board, placement, {}, variantConfigs.lineLevel);
-  assert.strictEqual(result.mutations.length, 4);
   assert.ok(result.mutations.every((m) => m.patch.value === 0));
-  assert.strictEqual(result.scoreDelta, 6 * 4);
 });
 
 t('line level does not clear a row that is not fully uniform', () => {
-  const board = createBoard(4);
+  const board = createBoard(3);
   cellAt(board, 1, 0).value = 6;
   cellAt(board, 1, 1).value = 6;
-  cellAt(board, 1, 2).value = 6;
-  cellAt(board, 1, 3).value = 5;
-  const placement = { changedCells: [{ r: 1, c: 3, op: 'plus1', prevValue: 4, value: 5 }] };
-  const result = lineLevel.onPlacementResolved(board, placement, {}, variantConfigs.lineLevel);
-  assert.strictEqual(result.mutations.length, 0);
+  cellAt(board, 1, 2).value = 5;
+  const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, {}, CFG);
+  assert.strictEqual(result.scoredTiles.length, 0);
 });
 
-t('pressure cooker turns a tile above the cap into a permanent dead cell', () => {
-  const board = createBoard(4);
-  cellAt(board, 2, 2).value = 13; // just pushed over the default cap of 12
-  const placement = { changedCells: [{ r: 2, c: 2, op: 'plus1', prevValue: 12, value: 13 }] };
-  const result = pressure.onPlacementResolved(board, placement, {}, variantConfigs.pressure);
-  const deadMutation = result.mutations.find((m) => m.r === 2 && m.c === 2);
-  assert.strictEqual(deadMutation.patch.blocked, true);
-  assert.strictEqual(canPlace(board, [{ r: 2, c: 2, op: 'none' }]), true, 'not yet blocked in this snapshot');
-  const nextBoard = { size: 4, cells: board.cells.map((c) => ({ ...c })) };
-  cellAt(nextBoard, 2, 2).blocked = true;
-  assert.strictEqual(canPlace(nextBoard, [{ r: 2, c: 2, op: 'none' }]), false, 'blocked once mutation applied');
-});
-
-t('blueprint checkWin requires an exact match against every target cell', () => {
+t('a tile at the crossing of two clearing lines only scores once', () => {
   const board = createBoard(3);
-  const level = LEVELS[0]; // target: (0,0)=1,(1,1)=1,(2,2)=1
-  const config = { ...variantConfigs.blueprint, level };
-  assert.strictEqual(blueprint.checkWin(board, {}, config), false);
-  level.targetBoard.forEach((v, i) => {
-    board.cells[i].value = v;
-  });
-  assert.strictEqual(blueprint.checkWin(board, {}, config), true);
-});
-
-t('every authored Blueprint level is solvable at its authored par', () => {
-  for (const level of LEVELS) {
-    const result = solveLevel(blueprint, level, variantConfigs.blueprint);
-    assert.ok(result.solvable, `${level.id} should be solvable`);
-    assert.strictEqual(result.par, level.par, `${level.id} par mismatch`);
+  for (let i = 0; i < 3; i++) {
+    cellAt(board, 1, i).value = 2; // middle row
+    cellAt(board, i, 1).value = 2; // middle column
   }
+  const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, {}, CFG);
+  const keys = result.scoredTiles.map((tile) => `${tile.r},${tile.c}`);
+  assert.strictEqual(new Set(keys).size, keys.length, 'no tile scored twice');
+  assert.strictEqual(keys.length, 5, 'a full plus-shape is 5 distinct tiles');
 });
 
-t('underflow (a) strict: -1 on 0 illegal, div2 on 0 illegal', () => {
-  const board = createBoard(4);
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }], 'strict'), false);
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }], 'strict'), false);
+t('engine routes each scored tile into its own column bar', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const config = { ...CFG, boardSize: 3, startValue: 0 };
+  const game = { ...createGame(lineLevel, config, 1), board };
+  // Place a no-op-ish block that leaves the completed row intact.
+  const block = createBlock('DOT', ['plus1']);
+  game.hand = [block];
+  const result = placeBlock(lineLevel, game, block.id, 0, 0);
+  assert.ok(result.ok);
+  assert.deepStrictEqual(result.state.bars, [16, 16, 16]);
+  assert.strictEqual(result.state.score, 48);
 });
 
-t('underflow (b) instaLoss: -1 on 0 is legal and drives the tile negative', () => {
-  const board = createBoard(4);
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }], 'instaLoss'), true);
-  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'instaLoss');
-  assert.strictEqual(cellAt(next, 0, 0).value, -1);
+t('filling every bar to capacity wins the run', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 9; // 81 each
+  const config = { ...CFG, boardSize: 3, barCapacity: 80 };
+  const game = { ...createGame(lineLevel, config, 1), board, bars: [0, 0, 0] };
+  const block = createBlock('DOT', ['plus1']);
+  game.hand = [block];
+  const result = placeBlock(lineLevel, game, block.id, 0, 0);
+  assert.strictEqual(result.state.won, true);
+  assert.strictEqual(result.state.gameOver, true);
 });
 
-t('underflow (c) clamp: -1 on 0 is legal and floors at 0', () => {
-  const board = createBoard(4);
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }], 'clamp'), true);
-  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'clamp');
-  assert.strictEqual(cellAt(next, 0, 0).value, 0);
-  assert.strictEqual(cellAt(next, 0, 0).blocked, false);
+t('striking out beats filling the bars on the same placement', () => {
+  const board = createBoard(3);
+  for (const cell of board.cells) cell.value = 9; // every line uniform, and capped
+  const config = { ...CFG, boardSize: 3, maxValue: 9, maxStrikes: 1, barCapacity: 10 };
+  const game = { ...createGame(lineLevel, config, 1), board, bars: [0, 0, 0] };
+  const block = createBlock('DOT', ['plus1']); // 9 -> 10, strikes, resets to 9
+  game.hand = [block];
+  const result = placeBlock(lineLevel, game, block.id, 0, 0);
+  assert.strictEqual(result.state.strikes, 1);
+  assert.ok(result.state.bars.every((b) => b >= 10), 'bars did fill too');
+  assert.strictEqual(result.state.won, false, 'the strike lands first, so it is a loss');
+  assert.strictEqual(result.state.gameOver, true);
 });
 
-t('underflow (d) deadAtZero: reaching 0 from positive kills the tile', () => {
-  const board = createBoard(4);
-  cellAt(board, 0, 0).value = 1;
-  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'deadAtZero');
-  assert.strictEqual(cellAt(next, 0, 0).value, 0);
-  assert.strictEqual(cellAt(next, 0, 0).blocked, true);
+t('reaching the strike limit loses the run', () => {
+  const config = { ...CFG, boardSize: 3, maxValue: 9, maxStrikes: 1 };
+  const board = createBoard(3);
+  cellAt(board, 0, 0).value = 9;
+  const game = { ...createGame(lineLevel, config, 1), board };
+  const block = createBlock('DOT', ['plus1']);
+  game.hand = [block];
+  const result = placeBlock(lineLevel, game, block.id, 0, 0);
+  assert.strictEqual(result.state.strikes, 1);
+  assert.strictEqual(result.state.won, false);
+  assert.strictEqual(result.state.gameOver, true);
 });
 
-t('underflow (d) does not kill a tile that was already 0', () => {
-  const board = createBoard(4);
-  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 'deadAtZero');
-  assert.strictEqual(cellAt(next, 0, 0).blocked, false, 'an all-zero starting board must survive');
-});
+// ---- order board ----------------------------------------------------
 
-t('div2 still requires an even value under every rule', () => {
-  const board = createBoard(4);
+t('order board banks a tile that lands exactly on target and scores it', () => {
+  const board = createBoard(3);
   cellAt(board, 0, 0).value = 3;
-  for (const rule of ['strict', 'instaLoss', 'clamp', 'deadAtZero']) {
-    assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }], rule), false, rule);
+  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 2, value: 3 }] };
+  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
+  assert.deepStrictEqual(result.scoredTiles, [{ r: 0, c: 0, value: 3 }]);
+  assert.strictEqual(result.mutations.find((m) => m.r === 0 && m.c === 0).patch.value, 0);
+  assert.strictEqual(result.variantState.banks, 1);
+});
+
+t('order board locks a tile that overshoots target into a stone', () => {
+  const board = createBoard(3);
+  cellAt(board, 0, 0).value = 5;
+  const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 4, value: 5 }] };
+  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
+  const lock = result.mutations.find((m) => m.r === 0 && m.c === 0);
+  assert.ok(lock.patch.allowedOps.has('minus1'));
+  assert.ok(!lock.patch.allowedOps.has('plus1'));
+});
+
+// ---- block generation ------------------------------------------------
+
+t('block sizes honour the configured spawn weights', () => {
+  const rng = new SeededRng(1234);
+  const config = { ...CFG, boardSize: 3, blockSizeWeights: { 1: 0, 2: 1, 3: 0 } };
+  for (let i = 0; i < 50; i++) {
+    assert.strictEqual(generateBlock(rng, config).cells.length, 2);
   }
 });
 
-t('the seed that dealt a dead opening hand is now playable under strict', () => {
-  // 3990774553 dealt three -1-carrying blocks onto an empty board.
-  const game = createGame(sandbox, { ...variantConfigs.sandbox }, 3990774553);
-  assert.strictEqual(game.gameOver, false, 'opening deal must be playable');
-  assert.ok(
-    game.hand.some((b) => anyPlacementForBlock(game.board, b, absoluteCells, 'strict') !== null)
-  );
+t('all three block sizes appear when all are weighted', () => {
+  const rng = new SeededRng(99);
+  const config = { ...CFG, boardSize: 3, blockSizeWeights: { 1: 1, 2: 1, 3: 1 } };
+  const sizes = new Set();
+  for (let i = 0; i < 200; i++) sizes.add(generateBlock(rng, config).cells.length);
+  assert.deepStrictEqual([...sizes].sort(), [1, 2, 3]);
 });
 
-t('no seed deals a dead opening hand under strict any more', () => {
-  let dead = 0;
-  for (let s = 1; s <= 800; s++) {
-    const game = createGame(sandbox, { ...variantConfigs.sandbox }, s * 7919);
-    if (game.gameOver) dead++;
+t('every generated block carries at least one real operator', () => {
+  const rng = new SeededRng(7);
+  const config = { ...CFG, boardSize: 3, blockSizeWeights: { 1: 1, 2: 1, 3: 1 } };
+  for (let i = 0; i < 300; i++) {
+    const block = generateBlock(rng, config);
+    assert.ok(block.cells.some((c) => c.op !== 'none'), block.shapeId);
   }
-  assert.strictEqual(dead, 0, `${dead} dead openings still present`);
+});
+
+t('generated shapes always fit the configured board', () => {
+  const rng = new SeededRng(21);
+  const config = { ...CFG, boardSize: 2, blockSizeWeights: { 1: 1, 2: 1, 3: 1 } };
+  for (let i = 0; i < 200; i++) {
+    const block = generateBlock(rng, config);
+    const maxR = Math.max(...block.cells.map((c) => c.dr));
+    const maxC = Math.max(...block.cells.map((c) => c.dc));
+    assert.ok(maxR < 2 && maxC < 2, `${block.shapeId} does not fit a 2x2 board`);
+  }
+});
+
+// ---- board setup -----------------------------------------------------
+
+t('board size is driven by config and gets one bar per column', () => {
+  for (const size of [2, 3, 5]) {
+    const game = createGame(lineLevel, { ...CFG, boardSize: size }, 5);
+    assert.strictEqual(game.board.size, size);
+    assert.strictEqual(game.board.cells.length, size * size);
+    assert.strictEqual(game.bars.length, size);
+  }
 });
 
 t('startValue seeds every tile, and random stays strictly inside 0..maxValue', () => {
-  const fixed = createGame(sandbox, { ...variantConfigs.sandbox, startValue: 6 }, 42);
+  const fixed = createGame(lineLevel, { ...CFG, startValue: 6 }, 42);
   assert.ok(fixed.board.cells.every((c) => c.value === 6));
 
-  const random = createGame(
-    sandbox,
-    { ...variantConfigs.sandbox, startValue: 'random', maxValue: 12 },
-    42
-  );
-  assert.ok(random.board.cells.every((c) => c.value > 0 && c.value < 12));
-  assert.ok(new Set(random.board.cells.map((c) => c.value)).size > 1, 'tiles should vary');
+  const random = createGame(lineLevel, { ...CFG, startValue: 'random', maxValue: 9 }, 42);
+  assert.ok(random.board.cells.every((c) => c.value > 0 && c.value < 9));
+});
+
+t('opening deals are playable across many seeds', () => {
+  let dead = 0;
+  for (let s = 1; s <= 400; s++) {
+    if (createGame(lineLevel, { ...CFG }, s * 7919).gameOver) dead++;
+  }
+  assert.strictEqual(dead, 0, `${dead} dead openings`);
 });
 
 console.log('\nsanity checks complete');

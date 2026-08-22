@@ -1,18 +1,40 @@
-// All exactly-3-cell block shapes, as relative {dr, dc} offsets normalized to
-// a minimal (0,0) bounding origin. No rotation happens at runtime (v1), so
-// every orientation the player should see must be listed explicitly here.
-export const SHAPES = [
-  { id: 'I_H', cells: [[0, 0], [0, 1], [0, 2]] },
-  { id: 'I_V', cells: [[0, 0], [1, 0], [2, 0]] },
-  { id: 'L1', cells: [[0, 0], [0, 1], [1, 0]] },
-  { id: 'L2', cells: [[0, 0], [0, 1], [1, 1]] },
-  { id: 'L3', cells: [[0, 0], [1, 0], [1, 1]] },
-  { id: 'L4', cells: [[0, 1], [1, 0], [1, 1]] },
-  { id: 'DIAG_DOWN', cells: [[0, 0], [1, 1], [2, 2]] },
-  { id: 'DIAG_UP', cells: [[0, 2], [1, 1], [2, 0]] },
-  { id: 'SCATTER_WIDE', cells: [[0, 0], [0, 2], [1, 1]] },
-  { id: 'SCATTER_TALL', cells: [[0, 1], [1, 0], [2, 1]] },
-];
+// Block shapes, as relative {dr, dc} offsets normalized to a minimal (0,0)
+// bounding origin. No rotation happens at runtime, so every orientation the
+// player should see is listed explicitly as its own shape.
+//
+// Grouped by tile count: a block is drawn by first picking a size from
+// config.blockSizeWeights, then a shape uniformly within that size.
+export const SHAPES_BY_SIZE = {
+  1: [{ id: 'DOT', cells: [[0, 0]] }],
+
+  2: [
+    { id: 'PAIR_H', cells: [[0, 0], [0, 1]] },
+    { id: 'PAIR_V', cells: [[0, 0], [1, 0]] },
+    { id: 'PAIR_DIAG_DOWN', cells: [[0, 0], [1, 1]] },
+    { id: 'PAIR_DIAG_UP', cells: [[0, 1], [1, 0]] },
+  ],
+
+  3: [
+    { id: 'I_H', cells: [[0, 0], [0, 1], [0, 2]] },
+    { id: 'I_V', cells: [[0, 0], [1, 0], [2, 0]] },
+    { id: 'L1', cells: [[0, 0], [0, 1], [1, 0]] },
+    { id: 'L2', cells: [[0, 0], [0, 1], [1, 1]] },
+    { id: 'L3', cells: [[0, 0], [1, 0], [1, 1]] },
+    { id: 'L4', cells: [[0, 1], [1, 0], [1, 1]] },
+    { id: 'DIAG_DOWN', cells: [[0, 0], [1, 1], [2, 2]] },
+    { id: 'DIAG_UP', cells: [[0, 2], [1, 1], [2, 0]] },
+    { id: 'SCATTER_WIDE', cells: [[0, 0], [0, 2], [1, 1]] },
+    { id: 'SCATTER_TALL', cells: [[0, 1], [1, 0], [2, 1]] },
+  ],
+};
+
+export const BLOCK_SIZES = [1, 2, 3];
+
+export const SHAPES = BLOCK_SIZES.flatMap((size) => SHAPES_BY_SIZE[size]);
+
+export function shapeById(id) {
+  return SHAPES.find((s) => s.id === id);
+}
 
 export function shapeBounds(shape) {
   const rows = shape.cells.map((c) => c[0]);
@@ -21,4 +43,12 @@ export function shapeBounds(shape) {
     height: Math.max(...rows) + 1,
     width: Math.max(...cols) + 1,
   };
+}
+
+// A shape only fits a board at least as large as its bounding box. On a 3x3
+// board the 3-wide diagonals still fit, but this keeps generation honest if
+// the board is shrunk further.
+export function shapeFitsBoard(shape, boardSize) {
+  const { height, width } = shapeBounds(shape);
+  return height <= boardSize && width <= boardSize;
 }

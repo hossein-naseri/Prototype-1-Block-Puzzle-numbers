@@ -5,52 +5,54 @@ import { seedFromString, randomSeed } from '../core/rng.js';
 import {
   renderBoard,
   renderBlockGlyph,
-  renderTargetGrid,
+  renderScoreBars,
+  pulseBars,
   showPreview,
   clearPreview,
   shakeCells,
   flashCells,
 } from './renderer.js';
 import { createLogger } from './logging.js';
-import { LEVELS } from '../config/levels.js';
-import { UNDERFLOW_RULES, UNDERFLOW_LABELS, UNDERFLOW_HELP } from '../core/ops.js';
 import {
   loadSettings,
   saveSettings,
   resetSettings,
   applySettings,
-  weightsAsPercent,
+  asPercent,
   OPERATOR_KEYS,
   OPERATOR_LABELS,
+  BLOCK_SIZES,
+  BLOCK_SIZE_LABELS,
 } from './settings.js';
 
 const boardEl = document.getElementById('board');
+const barsEl = document.getElementById('score-bars');
 const handEl = document.getElementById('hand');
 const nextHandEl = document.getElementById('next-hand');
 const scoreEl = document.getElementById('score');
+const strikesEl = document.getElementById('strikes');
+const strikesReadoutEl = document.getElementById('strikes-readout');
 const turnsEl = document.getElementById('turns');
 const hudEl = document.getElementById('hud');
 const variantSelectEl = document.getElementById('variant-select');
-const levelSelectEl = document.getElementById('level-select');
-const seedRowEl = document.getElementById('seed-row');
 const seedInputEl = document.getElementById('seed-input');
 const seedCopyBtn = document.getElementById('seed-copy');
 const restartBtn = document.getElementById('restart-btn');
 const gameOverEl = document.getElementById('game-over');
 const exportBtn = document.getElementById('export-log');
-const targetWrapEl = document.getElementById('target-wrap');
-const targetBoardEl = document.getElementById('target-board');
-const underflowSelectEl = document.getElementById('set-underflow');
-const underflowHelpEl = document.getElementById('underflow-help');
+
+const boardSizeEl = document.getElementById('set-board-size');
+const barCapacityEl = document.getElementById('set-bar-capacity');
+const maxValueEl = document.getElementById('set-max-value');
+const maxStrikesEl = document.getElementById('set-max-strikes');
 const startValueEl = document.getElementById('set-start-value');
 const startRandomEl = document.getElementById('set-start-random');
-const maxValueEl = document.getElementById('set-max-value');
+const blockSizeRowsEl = document.getElementById('block-size-rows');
 const weightRowsEl = document.getElementById('weight-rows');
 const settingsResetEl = document.getElementById('settings-reset');
 
 let variantName;
 let seed;
-let levelIndex = 0;
 let variant;
 let config;
 let state;
@@ -60,22 +62,16 @@ let selectedBlockId = null;
 
 function readParams() {
   const params = new URLSearchParams(location.search);
-  variantName = params.get('variant') || 'sandbox';
-  if (!VARIANT_NAMES.includes(variantName)) variantName = 'sandbox';
+  variantName = params.get('variant') || 'lineLevel';
+  if (!VARIANT_NAMES.includes(variantName)) variantName = 'lineLevel';
   const seedParam = params.get('seed');
   seed = seedParam ? seedFromString(seedParam) : randomSeed();
-  const levelParam = Number(params.get('level'));
-  levelIndex = Number.isInteger(levelParam) && LEVELS[levelParam] ? levelParam : 0;
 }
 
 function writeParams() {
   const params = new URLSearchParams();
   params.set('variant', variantName);
-  if (variantName === 'blueprint') {
-    params.set('level', String(levelIndex));
-  } else {
-    params.set('seed', String(seed));
-  }
+  params.set('seed', String(seed));
   history.replaceState(null, '', `?${params.toString()}`);
 }
 
@@ -88,32 +84,11 @@ function populateVariantSelect() {
     variantSelectEl.appendChild(opt);
   }
   variantSelectEl.value = variantName;
-
-  levelSelectEl.innerHTML = '';
-  LEVELS.forEach((level, i) => {
-    const opt = document.createElement('option');
-    opt.value = String(i);
-    opt.textContent = level.name;
-    levelSelectEl.appendChild(opt);
-  });
-  levelSelectEl.value = String(levelIndex);
 }
 
 function startGame() {
-  const isBlueprint = variantName === 'blueprint';
-  levelSelectEl.hidden = !isBlueprint;
-  seedRowEl.hidden = isBlueprint;
-  targetWrapEl.hidden = !isBlueprint;
-
   variant = getVariant(variantName);
   config = applySettings(getConfig(variantName), settings);
-  if (isBlueprint) {
-    // Blueprint levels are authored objects with solver-verified pars, all
-    // computed under strict legality. Letting the tuning panel change the
-    // number rules out from under them would silently invalidate every par,
-    // so levels always run strict and supply their own tile values.
-    config = { ...config, level: LEVELS[levelIndex], underflowRule: 'strict', startValue: 0 };
-  }
   state = createGame(variant, config, seed);
   selectedBlockId = null;
   gameOverEl.hidden = true;
@@ -122,65 +97,17 @@ function startGame() {
   if (logger) logger.endSession(state);
   // The ruleset is recorded with the session - without it the placement
   // data can't be interpreted, since two runs of the same seed under
-  // different underflow rules aren't comparable.
+  // different settings aren't comparable.
   logger = createLogger(variantName, seed, {
+    boardSize: config.boardSize,
     startValue: config.startValue,
     maxValue: config.maxValue,
-    underflowRule: config.underflowRule,
+    maxStrikes: config.maxStrikes,
+    barCapacity: config.barCapacity,
+    blockSizeWeights: config.blockSizeWeights,
     operatorWeights: config.operatorWeights,
-    boardSize: config.boardSize,
-    level: isBlueprint ? LEVELS[levelIndex].id : null,
   });
   render();
-}
-
-function renderSettingsPanel() {
-  underflowSelectEl.innerHTML = '';
-  for (const rule of UNDERFLOW_RULES) {
-    const opt = document.createElement('option');
-    opt.value = rule;
-    opt.textContent = UNDERFLOW_LABELS[rule];
-    underflowSelectEl.appendChild(opt);
-  }
-  underflowSelectEl.value = settings.underflowRule;
-  underflowHelpEl.textContent = UNDERFLOW_HELP[settings.underflowRule];
-
-  const isRandom = settings.startValue === 'random';
-  startRandomEl.checked = isRandom;
-  startValueEl.disabled = isRandom;
-  startValueEl.value = isRandom ? '' : String(settings.startValue);
-  maxValueEl.value = String(settings.maxValue);
-
-  const pct = weightsAsPercent(settings.operatorWeights);
-  weightRowsEl.innerHTML = '';
-  for (const key of OPERATOR_KEYS) {
-    const row = document.createElement('label');
-    row.className = 'weight-row';
-    const label = document.createElement('span');
-    label.innerHTML = `${OPERATOR_LABELS[key]} <span class="pct">${pct[key]}%</span>`;
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.min = '0';
-    input.step = '0.005';
-    input.value = String(settings.operatorWeights[key]);
-    input.addEventListener('change', () => {
-      const weight = Number(input.value);
-      if (!Number.isFinite(weight) || weight < 0) return;
-      settings = { ...settings, operatorWeights: { ...settings.operatorWeights, [key]: weight } };
-      commitSettings();
-    });
-    row.append(label, input);
-    weightRowsEl.appendChild(row);
-  }
-}
-
-// Every settings change restarts the run - the values it controls (start
-// tiles, weights, number rules) are all baked in at deal time, so applying
-// them mid-run would produce a board that matches neither ruleset.
-function commitSettings() {
-  saveSettings(settings);
-  renderSettingsPanel();
-  startGame();
 }
 
 function render() {
@@ -191,22 +118,23 @@ function render() {
     (r, c) => onCellDrop(r, c),
     (r, c) => onCellClick(r, c)
   );
+  renderScoreBars(barsEl, state.bars, config.barCapacity, state.board.size);
   renderHand();
   scoreEl.textContent = String(state.score);
+  strikesEl.textContent = `${state.strikes} / ${config.maxStrikes}`;
+  strikesReadoutEl.classList.toggle('danger', state.strikes >= config.maxStrikes - 1);
   turnsEl.textContent = String(state.turns);
   renderHud();
-  if (variantName === 'blueprint') {
-    renderTargetGrid(targetBoardEl, config.level.targetBoard, config.level.boardSize, state.board);
-  }
+
   if (state.gameOver) {
     gameOverEl.hidden = false;
-    const underflowed = state.lastEvents.some((e) => e.type === 'underflowLoss');
-    if (variantName === 'blueprint') {
-      gameOverEl.textContent = state.won ? `Solved in ${state.turns} (par ${config.level.par})!` : 'Out of moves';
-    } else if (underflowed) {
-      gameOverEl.textContent = `Below zero — run ended. Score ${state.score}`;
+    gameOverEl.classList.toggle('win', state.won);
+    if (state.won) {
+      gameOverEl.textContent = `All bars full — you win! ${state.turns} turns`;
+    } else if (state.strikes >= config.maxStrikes) {
+      gameOverEl.textContent = `${state.strikes} strikes — out. Score ${state.score}`;
     } else {
-      gameOverEl.textContent = state.won ? 'Solved!' : `Game over — score ${state.score}`;
+      gameOverEl.textContent = `No legal moves left. Score ${state.score}`;
     }
     if (logger) logger.endSession(state);
   }
@@ -227,7 +155,7 @@ function renderHand() {
     if (block.id === selectedBlockId) slot.classList.add('selected');
     slot.appendChild(renderBlockGlyph(block));
     slot.addEventListener('click', () => selectBlock(block.id));
-    slot.addEventListener('pointerdown', (e) => startDrag(e, block.id));
+    slot.addEventListener('pointerdown', () => startDrag(block.id));
     handEl.appendChild(slot);
   }
 
@@ -245,8 +173,8 @@ function selectBlock(blockId) {
 
 function onCellHover(r, c) {
   if (!selectedBlockId || dragging) return;
-  const { legal, fatal, absCells } = previewPlacement(state, selectedBlockId, r, c);
-  showPreview(boardEl, state.board, absCells, legal, fatal);
+  const { legal, strikes, absCells } = previewPlacement(state, selectedBlockId, r, c);
+  showPreview(boardEl, state.board, absCells, legal, strikes);
 }
 
 function onCellClick(r, c) {
@@ -268,19 +196,26 @@ function commitPlacement(blockId, r, c) {
     state = result.state;
     return;
   }
+
   if (logger) logger.logPlacement(state, result);
   state = result.state;
   selectedBlockId = null;
   clearPreview(boardEl);
   render();
-  if (result.placement) flashCells(boardEl, result.placement.changedCells);
+
+  const struck = result.events.find((e) => e.type === 'strike');
+  if (struck) flashCells(boardEl, struck.cells, 'strike-flash');
+  else if (result.placement) flashCells(boardEl, result.placement.changedCells);
+
+  const filled = result.events.find((e) => e.type === 'barFill');
+  if (filled) pulseBars(barsEl, [...new Set(filled.scoredTiles.map((t) => t.c))]);
 }
 
 // Minimal drag support: pointerdown on a hand slot starts a drag; the board
 // cell under the pointer is previewed as it moves, and release commits.
 let dragging = null;
 
-function startDrag(e, blockId) {
+function startDrag(blockId) {
   selectedBlockId = blockId;
   renderHand();
   dragging = { blockId };
@@ -301,13 +236,86 @@ function startDrag(e, blockId) {
   window.addEventListener('pointerup', up);
 }
 
-variantSelectEl.addEventListener('change', () => {
-  variantName = variantSelectEl.value;
+// ---- Settings panel -------------------------------------------------
+
+function renderWeightRows(container, keys, labels, weightsKey) {
+  const pct = asPercent(settings[weightsKey], keys);
+  container.innerHTML = '';
+  for (const key of keys) {
+    const row = document.createElement('label');
+    row.className = 'weight-row';
+
+    const label = document.createElement('span');
+    label.innerHTML = `${labels[key]} <span class="pct">${pct[key]}%</span>`;
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.step = '0.05';
+    input.value = String(settings[weightsKey][key]);
+    input.addEventListener('change', () => {
+      const weight = Number(input.value);
+      if (!Number.isFinite(weight) || weight < 0) return;
+      settings = { ...settings, [weightsKey]: { ...settings[weightsKey], [key]: weight } };
+      commitSettings();
+    });
+
+    row.append(label, input);
+    container.appendChild(row);
+  }
+}
+
+function renderSettingsPanel() {
+  boardSizeEl.value = String(settings.boardSize);
+  barCapacityEl.value = String(settings.barCapacity);
+  maxValueEl.value = String(settings.maxValue);
+  maxStrikesEl.value = String(settings.maxStrikes);
+
+  const isRandom = settings.startValue === 'random';
+  startRandomEl.checked = isRandom;
+  startValueEl.disabled = isRandom;
+  startValueEl.value = isRandom ? '' : String(settings.startValue);
+
+  renderWeightRows(blockSizeRowsEl, BLOCK_SIZES, BLOCK_SIZE_LABELS, 'blockSizeWeights');
+  renderWeightRows(weightRowsEl, OPERATOR_KEYS, OPERATOR_LABELS, 'operatorWeights');
+}
+
+// Every settings change restarts the run - the values it controls (board
+// size, start tiles, weights, caps) are all baked in at deal time, so
+// applying them mid-run would produce a board matching neither ruleset.
+function commitSettings() {
+  saveSettings(settings);
+  renderSettingsPanel();
   startGame();
+}
+
+function bindNumberSetting(el, key, min) {
+  el.addEventListener('change', () => {
+    const value = Number(el.value);
+    if (!Number.isFinite(value)) return;
+    settings = { ...settings, [key]: Math.max(min, Math.floor(value)) };
+    commitSettings();
+  });
+}
+
+bindNumberSetting(boardSizeEl, 'boardSize', 2);
+bindNumberSetting(barCapacityEl, 'barCapacity', 1);
+bindNumberSetting(maxValueEl, 'maxValue', 1);
+bindNumberSetting(maxStrikesEl, 'maxStrikes', 1);
+bindNumberSetting(startValueEl, 'startValue', 0);
+
+startRandomEl.addEventListener('change', () => {
+  settings = { ...settings, startValue: startRandomEl.checked ? 'random' : 0 };
+  commitSettings();
 });
 
-levelSelectEl.addEventListener('change', () => {
-  levelIndex = Number(levelSelectEl.value);
+settingsResetEl.addEventListener('click', () => {
+  settings = resetSettings();
+  commitSettings();
+});
+
+variantSelectEl.addEventListener('change', () => {
+  variantName = variantSelectEl.value;
   startGame();
 });
 
@@ -334,48 +342,7 @@ exportBtn.addEventListener('click', () => {
   createLogger.exportAll();
 });
 
-underflowSelectEl.addEventListener('change', () => {
-  settings = { ...settings, underflowRule: underflowSelectEl.value };
-  commitSettings();
-});
-
-startRandomEl.addEventListener('change', () => {
-  settings = { ...settings, startValue: startRandomEl.checked ? 'random' : 0 };
-  commitSettings();
-});
-
-startValueEl.addEventListener('change', () => {
-  const value = Math.max(0, Math.floor(Number(startValueEl.value)));
-  if (!Number.isFinite(value)) return;
-  settings = { ...settings, startValue: value };
-  commitSettings();
-});
-
-maxValueEl.addEventListener('change', () => {
-  const value = Math.max(1, Math.floor(Number(maxValueEl.value)));
-  if (!Number.isFinite(value)) return;
-  settings = { ...settings, maxValue: value };
-  commitSettings();
-});
-
-settingsResetEl.addEventListener('click', () => {
-  settings = resetSettings();
-  commitSettings();
-});
-
 readParams();
 populateVariantSelect();
 renderSettingsPanel();
 startGame();
-
-// Console dev tool: import('./core/solver.js').then(...) works too, but this
-// saves a trip - open devtools and run e.g.
-//   OperatorBlocks.solveAllLevels()
-import('../core/solver.js').then(({ solveLevel, solveAllLevels }) => {
-  window.OperatorBlocks = {
-    LEVELS,
-    solveLevel: (levelIndexArg = levelIndex) =>
-      solveLevel(getVariant('blueprint'), LEVELS[levelIndexArg], getConfig('blueprint')),
-    solveAllLevels: () => solveAllLevels(getVariant('blueprint'), LEVELS, getConfig('blueprint')),
-  };
-});
