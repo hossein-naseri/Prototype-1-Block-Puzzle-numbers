@@ -1,9 +1,4 @@
-import { shapeBounds, SHAPES } from '../core/shapes.js';
 import { OPS } from '../core/ops.js';
-
-function shapeById(id) {
-  return SHAPES.find((s) => s.id === id);
-}
 
 export function blockBounds(block) {
   const rows = block.cells.map((c) => c.dr);
@@ -11,13 +6,17 @@ export function blockBounds(block) {
   return { height: Math.max(...rows) + 1, width: Math.max(...cols) + 1 };
 }
 
-// Renders a block into a small NxM grid (for hand slots and next-hand preview).
+// Renders a block into a small NxM grid (for hand slots and next-hand
+// preview). Glyphs are laid out on a fixed 3x3 so a 1-tile block doesn't
+// balloon to fill the whole slot.
 export function renderBlockGlyph(block) {
   const { height, width } = blockBounds(block);
   const el = document.createElement('div');
   el.className = 'block-glyph';
   el.style.gridTemplateRows = `repeat(${height}, 1fr)`;
   el.style.gridTemplateColumns = `repeat(${width}, 1fr)`;
+  el.style.width = `${(width / 3) * 100}%`;
+  el.style.height = `${(height / 3) * 100}%`;
 
   const grid = new Map();
   for (const cell of block.cells) grid.set(`${cell.dr},${cell.dc}`, cell.op);
@@ -63,34 +62,52 @@ export function renderBoard(boardEl, board, onCellPointerEnter, onCellPointerUp,
   }
 }
 
-export function renderTargetGrid(el, targetValues, boardSize, currentBoard) {
-  el.style.gridTemplateColumns = `repeat(${boardSize}, 1fr)`;
-  el.style.gridTemplateRows = `repeat(${boardSize}, 1fr)`;
-  el.innerHTML = '';
-  for (let i = 0; i < targetValues.length; i++) {
-    const cellEl = document.createElement('div');
-    cellEl.className = 'target-cell';
-    const value = targetValues[i];
-    if (value !== 0) {
-      cellEl.textContent = String(value);
-      cellEl.classList.add('nonzero');
+// One vertical bar per column, sitting directly above it and filling from
+// the bottom as that column's tiles are scored.
+export function renderScoreBars(barsEl, bars, capacity, boardSize) {
+  barsEl.style.gridTemplateColumns = `repeat(${boardSize}, 1fr)`;
+  barsEl.innerHTML = '';
+  for (let c = 0; c < boardSize; c++) {
+    const fill = bars[c] || 0;
+    const pct = Math.min(100, (fill / capacity) * 100);
+
+    const track = document.createElement('div');
+    track.className = 'bar-track';
+    track.dataset.c = c;
+    if (fill >= capacity) track.classList.add('full');
+
+    const fillEl = document.createElement('div');
+    fillEl.className = 'bar-fill';
+    fillEl.style.height = `${pct}%`;
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'bar-label';
+    labelEl.textContent = `${Math.min(fill, capacity)}`;
+
+    track.append(fillEl, labelEl);
+    barsEl.appendChild(track);
+  }
+}
+
+export function pulseBars(barsEl, columns) {
+  for (const c of columns) {
+    const el = barsEl.querySelector(`.bar-track[data-c="${c}"]`);
+    if (el) {
+      el.classList.add('bar-pop');
+      setTimeout(() => el.classList.remove('bar-pop'), 400);
     }
-    if (currentBoard && currentBoard.cells[i].value === value) {
-      cellEl.classList.add('matched');
-    }
-    el.appendChild(cellEl);
   }
 }
 
 export function clearPreview(boardEl) {
   boardEl.querySelectorAll('.cell').forEach((el) => {
-    el.classList.remove('preview-legal', 'preview-illegal', 'preview-fatal');
+    el.classList.remove('preview-legal', 'preview-illegal', 'preview-strike');
   });
 }
 
-export function showPreview(boardEl, board, absCells, legal, fatal = false) {
+export function showPreview(boardEl, board, absCells, legal, strikes = 0) {
   clearPreview(boardEl);
-  const cls = !legal ? 'preview-illegal' : fatal ? 'preview-fatal' : 'preview-legal';
+  const cls = !legal ? 'preview-illegal' : strikes > 0 ? 'preview-strike' : 'preview-legal';
   for (const { r, c } of absCells) {
     if (r < 0 || c < 0 || r >= board.size || c >= board.size) continue;
     const el = boardEl.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
@@ -108,12 +125,12 @@ export function shakeCells(boardEl, absCells) {
   }
 }
 
-export function flashCells(boardEl, cells) {
+export function flashCells(boardEl, cells, cls = 'flash') {
   for (const { r, c } of cells) {
     const el = boardEl.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
     if (el) {
-      el.classList.add('flash');
-      setTimeout(() => el.classList.remove('flash'), 400);
+      el.classList.add(cls);
+      setTimeout(() => el.classList.remove(cls), 400);
     }
   }
 }

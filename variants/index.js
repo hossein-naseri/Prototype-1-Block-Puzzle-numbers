@@ -1,22 +1,14 @@
-import { sandbox } from './sandbox.js';
-import { bloom } from './bloom.js';
 import { orderBoard } from './orderBoard.js';
 import { lineLevel } from './lineLevel.js';
-import { pressure } from './pressure.js';
-import { blueprint } from './blueprint.js';
 
-// Variants register themselves here as they're built (see build order in
-// DESIGN.md). Each entry implements the shared interface documented in
-// core/engine.js.
+// Each entry implements the shared interface documented in core/engine.js.
+// Variants decide *when* a tile's number turns into score; the engine owns
+// everything else (number rules, column bars, win/lose).
 export const VARIANTS = {
-  sandbox,
-  bloom,
-  orderBoard,
   lineLevel,
-  pressure,
-  blueprint,
+  orderBoard,
 };
 
 export function getVariant(name) {
-  return VARIANTS[name] || VARIANTS.sandbox;
+  return VARIANTS[name] || VARIANTS.lineLevel;
 }
