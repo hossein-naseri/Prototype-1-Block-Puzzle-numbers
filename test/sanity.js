@@ -405,72 +405,108 @@ t('fight: magnitude is capped in both directions, with no strikes', () => {
   assert.strictEqual(strikesAdded, 0, 'signed mode never charges strikes');
 });
 
-t('fight: a red tile flanked by 2 equal-or-higher green tiles flips green', () => {
-  // green 3 | red 3 | green 3   -> the red is surrounded on either side
+t('fight: the brief\'s worked example converts', () => {
+  // centre red 3; red 1 north, red 2 east (red total 6);
+  // green 4 west, green 3 south (green total 7). 6 < 7 -> flips.
   const board = fightBoard([
-    [3, -3, 3],
-    [0, 0, 0],
-    [0, 0, 0],
+    [0, -1, 0],
+    [4, -3, -2],
+    [0, 3, 0],
   ]);
   const flips = resolveConversions(board);
-  assert.deepStrictEqual(flips, [{ r: 0, c: 1, from: -3, to: 3 }]);
+  const centre = flips.find((f) => f.r === 1 && f.c === 1);
+  assert.ok(centre, 'the centre red tile should convert');
+  assert.strictEqual(centre.to, 3, 'it keeps its magnitude');
 });
 
-t('fight: conversion needs the surrounders to be equal or higher', () => {
+t('fight: a tie leaves the red tile alone', () => {
+  // red 3 + red 1 = 4 vs green 2 + green 2 = 4. Not strictly less.
   const board = fightBoard([
+    [0, -1, 0],
     [2, -3, 2],
-    [0, 0, 0],
-    [0, 0, 0],
-  ]);
-  assert.deepStrictEqual(resolveConversions(board), [], 'green 2 cannot flip red 3');
-});
-
-t('fight: one horizontal + one vertical neighbour converts a corner tile', () => {
-  const board = fightBoard([
-    [-2, 2, 0],
-    [2, 0, 0],
-    [0, 0, 0],
-  ]);
-  const flips = resolveConversions(board);
-  assert.deepStrictEqual(flips, [{ r: 0, c: 0, from: -2, to: 2 }]);
-});
-
-t('fight: a single neighbour is not enough', () => {
-  const board = fightBoard([
-    [-2, 2, 0],
-    [0, 0, 0],
     [0, 0, 0],
   ]);
   assert.deepStrictEqual(resolveConversions(board), []);
 });
 
-t('fight: red converts green by the same rule', () => {
+t('fight: red must be strictly out-muscled', () => {
+  // red 3 alone vs green 2 + green 2 = 4 > 3 -> converts
   const board = fightBoard([
-    [-4, 4, -4],
     [0, 0, 0],
+    [2, -3, 2],
+    [0, 0, 0],
+  ]);
+  assert.strictEqual(resolveConversions(board).length, 1);
+});
+
+t('fight: fewer than 2 green neighbours never converts, however strong', () => {
+  const board = fightBoard([
+    [0, 0, 0],
+    [9, -1, 0],
+    [0, 0, 0],
+  ]);
+  assert.deepStrictEqual(resolveConversions(board), [], 'one green 9 is not enough');
+});
+
+t('fight: red neighbours prop up the defending tile', () => {
+  // without the red 4 to the north this would convert (1 < 2+2)
+  const weak = fightBoard([
+    [0, 0, 0],
+    [2, -1, 2],
+    [0, 0, 0],
+  ]);
+  assert.strictEqual(resolveConversions(weak).length, 1);
+
+  const propped = fightBoard([
+    [0, -4, 0],
+    [2, -1, 2],
+    [0, 0, 0],
+  ]);
+  const flippedCentre = resolveConversions(propped).some((f) => f.r === 1 && f.c === 1);
+  assert.strictEqual(flippedCentre, false, 'red 1 + red 4 = 5 >= green 4');
+});
+
+t('fight: red can no longer convert green', () => {
+  const board = fightBoard([
+    [-9, 1, -9],
+    [0, -9, 0],
+    [0, 0, 0],
+  ]);
+  const flippedGreen = resolveConversions(board).some((f) => f.from > 0);
+  assert.strictEqual(flippedGreen, false, 'conversion is green-only now');
+});
+
+t('fight: conversions cascade until stable', () => {
+  // (1,1) converts first (red 1 < green 2+2), which then gives (2,1) the
+  // second green neighbour it needs.
+  const board = fightBoard([
+    [0, 2, 0],
+    [2, -1, 0],
+    [0, -1, 2],
+  ]);
+  const flips = resolveConversions(board);
+  const at = (r, c) => flips.some((f) => f.r === r && f.c === c);
+  assert.ok(at(1, 1), 'first flip');
+  assert.ok(at(2, 1), 'chain reaction flip');
+});
+
+t('fight: a corner red tile can be converted by its two neighbours', () => {
+  const board = fightBoard([
+    [-1, 2, 0],
+    [2, 0, 0],
     [0, 0, 0],
   ]);
   const flips = resolveConversions(board);
-  assert.deepStrictEqual(flips, [{ r: 0, c: 1, from: 4, to: -4 }]);
+  assert.deepStrictEqual(flips, [{ r: 0, c: 0, from: -1, to: 1 }]);
 });
 
-t('fight: a converted tile keeps its magnitude', () => {
+t('fight: neutral 0 tiles are neither converted nor counted', () => {
   const board = fightBoard([
-    [7, -5, 7],
-    [0, 0, 0],
+    [0, 3, 0],
+    [3, 0, 0],
     [0, 0, 0],
   ]);
-  assert.strictEqual(resolveConversions(board)[0].to, 5);
-});
-
-t('fight: neutral 0 tiles neither convert nor are converted', () => {
-  const board = fightBoard([
-    [3, 0, 3],
-    [0, 0, 0],
-    [-1, 0, -1],
-  ]);
-  const flipped = resolveConversions(board).map((f) => `${f.r},${f.c}`);
-  assert.ok(!flipped.includes('0,1'), 'a 0 tile is not a conversion target');
+  assert.deepStrictEqual(resolveConversions(board), [], 'a 0 tile is not a target');
 });
 
 t('fight: control target is more than 70% of the board', () => {
@@ -494,6 +530,39 @@ t('fight: holding the target share wins, and the mirror loses', () => {
     [-1, 0, 0],
   ]);
   assert.strictEqual(fight.getOutcome(red, {}, FIGHT).lost, true);
+});
+
+t('fight: the engine applies a turn-end conversion to the real board', () => {
+  // Full path: place the last block of a hand -> onTurnEnd fires -> threats
+  // land -> conversions resolve -> mutations land on the state's board.
+  const board = fightBoard([
+    [0, 0, 0],
+    [3, -1, 3],
+    [0, 0, 0],
+  ]);
+  const base = createGame(fight, FIGHT, 5);
+  const block = createBlock('DOT', ['none']);
+  const game = {
+    ...base,
+    board,
+    hand: [block], // spending this empties the hand and ends the turn
+    variantState: { threats: {}, round: 1 },
+  };
+  const result = placeBlock(fight, game, block.id, 0, 0);
+  assert.ok(result.ok);
+  assert.strictEqual(
+    result.state.board.cells[1 * 3 + 1].value,
+    1,
+    'red 1 (< green 3+3) should be green 1 on the resolved board'
+  );
+});
+
+t('fight: an already-decided starting board reports at once', () => {
+  // startValue 4 hands green the whole board before a block is placed.
+  const game = createGame(fight, { ...FIGHT, startValue: 4 }, 11);
+  assert.strictEqual(game.gameOver, true);
+  assert.strictEqual(game.won, true);
+  assert.match(game.outcomeReason, /green holds 9\/9/);
 });
 
 t('fight: 6 of 9 tiles is not yet a win', () => {
@@ -534,6 +603,21 @@ t('fight: queued threats land at the end of the turn and advance the round', () 
   assert.strictEqual(byCell['1,1'], -1, '1 triangle -> red 1');
   assert.strictEqual(result.variantState.round, 2);
   assert.strictEqual(Object.keys(result.variantState.threats).length, 3, 'next turn re-rolled');
+});
+
+t('fight: placements alone do not convert - that waits for turn end', () => {
+  const board = fightBoard([
+    [0, 0, 0],
+    [2, -1, 2],
+    [0, 0, 0],
+  ]);
+  const result = fight.onPlacementResolved(board, { changedCells: [] }, {}, FIGHT);
+  assert.deepStrictEqual(result.mutations, []);
+  const atEnd = fight.onTurnEnd(board, { threats: {}, round: 1 }, FIGHT, new SeededRng(3));
+  assert.ok(
+    atEnd.mutations.some((m) => m.r === 1 && m.c === 1 && m.patch.value === 1),
+    'the same board converts during the end-of-turn phase'
+  );
 });
 
 t('fight: a threat on a green tile lowers it rather than flipping it', () => {
