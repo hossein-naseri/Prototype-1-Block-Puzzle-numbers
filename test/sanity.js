@@ -605,19 +605,30 @@ t('fight: queued threats land at the end of the turn and advance the round', () 
   assert.strictEqual(Object.keys(result.variantState.threats).length, 3, 'next turn re-rolled');
 });
 
-t('fight: placements alone do not convert - that waits for turn end', () => {
+t('fight: a placement converts immediately, without waiting for turn end', () => {
   const board = fightBoard([
     [0, 0, 0],
     [2, -1, 2],
     [0, 0, 0],
   ]);
   const result = fight.onPlacementResolved(board, { changedCells: [] }, {}, FIGHT);
-  assert.deepStrictEqual(result.mutations, []);
-  const atEnd = fight.onTurnEnd(board, { threats: {}, round: 1 }, FIGHT, new SeededRng(3));
   assert.ok(
-    atEnd.mutations.some((m) => m.r === 1 && m.c === 1 && m.patch.value === 1),
-    'the same board converts during the end-of-turn phase'
+    result.mutations.some((m) => m.r === 1 && m.c === 1 && m.patch.value === 1),
+    'red 1 out-muscled by green 2+2 flips on the placement itself'
   );
+});
+
+t('fight: conversions are re-checked after the threats land', () => {
+  // Nothing to convert until the threat drops a red tile between two greens.
+  const board = fightBoard([
+    [0, 0, 0],
+    [2, 0, 2],
+    [0, 0, 0],
+  ]);
+  assert.deepStrictEqual(fight.onPlacementResolved(board, { changedCells: [] }, {}, FIGHT).mutations, []);
+  const atEnd = fight.onTurnEnd(board, { threats: { '1,1': 1 }, round: 1 }, FIGHT, new SeededRng(3));
+  const centre = atEnd.mutations.filter((m) => m.r === 1 && m.c === 1);
+  assert.strictEqual(centre.at(-1).patch.value, 1, 'threat makes it red 1, then it converts to green 1');
 });
 
 t('fight: a threat on a green tile lowers it rather than flipping it', () => {

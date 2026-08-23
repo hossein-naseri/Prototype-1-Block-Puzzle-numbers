@@ -139,12 +139,14 @@ one placement:
 1. At the start of a turn, `threatsPerTurn` (default **3**) tiles are picked
    at random and marked with 1–`threatMaxStacks` (default **2**) red
    triangles in their top-left corner — a visible warning of what's coming.
-2. The player places all three blocks.
-3. At the end of the turn each marked tile takes that many points of red
+2. The player places all three blocks. **Conversions resolve after every
+   single placement**, so each block's consequence is immediate rather than
+   deferred to the end of the turn.
+3. Once the hand is spent, each marked tile takes that many points of red
    pressure (`-1` per triangle). A 0 becomes a red 1; a red 1 becomes a red
    2; a green 3 drops to a green 2.
-4. The board re-resolves, next turn's threats are rolled, and a fresh hand
-   is dealt.
+4. Conversions are re-checked against the post-threat board, next turn's
+   threats are rolled, and a fresh hand is dealt.
 
 The engine calls this end-of-turn phase through an `onTurnEnd` hook, which
 fires when the last block of a hand is placed and before the next hand is
@@ -180,9 +182,10 @@ Two details not spelled out, resolved this way:
 
 - **Neutral 0 tiles neither convert nor count.** They have no colour, so
   they can't be a target and add nothing to either side's strength.
-- **Conversion happens only in the end-of-turn phase**, after the threats
-  land — matching the brief's "at the end of the turn the red tile becomes
-  a green tile". Placements during the turn only move numbers.
+- **Conversion is checked after every block placement**, and again at the
+  end of the turn once the threats have landed. The second check matters:
+  a threat can drop a red tile between two greens, and without it that tile
+  would sit visibly un-taken until the player's next placement.
 
 **Win / lose.** Whichever side holds more than `controlThreshold` (default
 **70%**) of the tiles ends the run — green wins, red loses. On a 3×3 that's
@@ -287,29 +290,28 @@ Fight Mode used to be hopeless for green — a control-maximising bot won
 **1/60** at the original numbers, because red applied 3–6 points of pressure
 per turn while green's hand carried barely any `+1` cells.
 
-Three changes fixed it together: the higher `+1` weight (.18 → .31),
-green-only conversion, and cascading. Same bot, same 60 seeds, at the
-current defaults:
+Four changes fixed it: the higher `+1` weight (.18 → .31), green-only
+conversion, cascading, and checking conversions after every placement
+rather than once per turn. Same bot, same 60 seeds:
 
-**24 wins / 30 losses / 6 stalemates**, averaging 4.0 green vs 4.6 red
-tiles over ~29 rounds. Close to a coin flip, and games now run long enough
-to have a shape.
+| conversion timing | result | avg green | avg red | avg rounds |
+|---|---|---|---|---|
+| original symmetric rule, per turn | 1 win / 59 losses | 0.6 | 7.0 | 7 |
+| green-only + cascade, per turn | 24 / 30 (+6 stalemate) | 4.0 | 4.6 | 29 |
+| green-only + cascade, **per placement** (current) | **40 / 17** (+3 stalemate) | 5.6 | 2.7 | 13.5 |
 
-The threat knobs remain the difficulty dial, and they're much less brutal
-than before:
+Moving the check to every placement is a big swing toward green — it fires
+three times a turn instead of once, so green compounds faster and cascades
+start earlier. Games are also about half as long.
 
-| threats/turn | max triangles | green wins |
-|---|---|---|
-| 1 | 1 | 60/60 |
-| 2 | 1 | 60/60 |
-| 2 | 2 | 59/60 |
-| 3 | 1 | 59/60 |
-| 3 | 2 (default) | 24/60 |
+Green now has the edge rather than it being a coin flip. If that reads as
+too easy in real play, the threat knobs are the dial, though note the cliff
+below the default is steep — at `2 threats / 1 triangle` the earlier build
+was already 60/60 for green. Nudging `threatsPerTurn` to 4, or raising
+`threatMaxStacks`, is the direction with headroom now.
 
-Note how sharp the cliff is: anything below the default is a walkover for
-green. The default is where the tension lives. The 6 stalemates are runs
-that hit the simulation's 400-placement cap without either side reaching
-70% — worth watching for in real play.
+The stalemates are runs that hit the simulation's 400-placement cap without
+either side reaching 70% — worth watching for in real play.
 
 ### Known problem: the ÷2 dead end
 
