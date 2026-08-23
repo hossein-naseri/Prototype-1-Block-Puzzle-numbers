@@ -10,9 +10,10 @@ import { confine } from '../core/resolve.js';
 // the operators read naturally from either side: +1 pushes a tile toward
 // green, -1 toward red, x2 doubles whoever holds it.
 //
-// A turn is all three blocks. Placements only move numbers; the queued red
-// threats land and conversions resolve together in one phase at the end of
-// the turn (see onTurnEnd).
+// A turn is all three blocks. Conversions are checked after every single
+// placement, so each block's consequence is immediate. The queued red
+// threats land only once the whole hand is spent (see onTurnEnd), and
+// conversions are re-checked there too, since the threats change the board.
 
 const NEIGHBOURS = [
   [-1, 0],
@@ -159,11 +160,12 @@ export const fight = {
     };
   },
 
-  // Placements only move numbers. Everything else - threats landing,
-  // conversions - happens in one resolution phase at the end of the turn,
-  // once all three blocks are down.
-  onPlacementResolved() {
-    return { mutations: [], scoredTiles: [], scoredLines: [], events: [] };
+  // Conversions resolve immediately after every block placement, so the
+  // player sees the consequence of each block as they place it rather than
+  // only once the turn is over.
+  onPlacementResolved(board) {
+    const { mutations, events } = conversionResult(board);
+    return { mutations, scoredTiles: [], scoredLines: [], events };
   },
 
   onTurnEnd(board, variantState, config, rng) {
