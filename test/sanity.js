@@ -105,17 +105,15 @@ t('score for a tile is its value squared', () => {
   assert.strictEqual(tileScore(9), 81);
 });
 
-t('a cleared line of 4s sends 16 into each column bar it spans', () => {
+t('a cleared row of 4s scores 16 per tile and is attributed to that row', () => {
   const board = createBoard(3);
   for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
   const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, {}, CFG);
   assert.strictEqual(result.scoredTiles.length, 3);
   assert.ok(result.scoredTiles.every((tile) => tileScore(tile.value) === 16));
-  assert.deepStrictEqual(
-    result.scoredTiles.map((tile) => tile.c).sort(),
-    [0, 1, 2]
-  );
   assert.ok(result.mutations.every((m) => m.patch.value === 0));
+  // The match was made on the row, so only the row's quota is a candidate.
+  assert.deepStrictEqual(result.scoredLines, [{ kind: 'row', index: 1, value: 4 }]);
 });
 
 t('line level does not clear a row that is not fully uniform', () => {
@@ -139,42 +137,97 @@ t('a tile at the crossing of two clearing lines only scores once', () => {
   assert.strictEqual(keys.length, 5, 'a full plus-shape is 5 distinct tiles');
 });
 
-t('engine routes each scored tile into its own column bar', () => {
-  const board = createBoard(3);
-  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
-  const config = { ...CFG, boardSize: 3, startValue: 0 };
-  const game = { ...createGame(lineLevel, config, 1), board };
-  // Place a no-op-ish block that leaves the completed row intact.
-  const block = createBlock('DOT', ['plus1']);
-  game.hand = [block];
-  const result = placeBlock(lineLevel, game, block.id, 0, 0);
-  assert.ok(result.ok);
-  assert.deepStrictEqual(result.state.bars, [16, 16, 16]);
-  assert.strictEqual(result.state.score, 48);
+t('quotas are rolled for every row and column, within 1..maxValue', () => {
+  const game = createGame(lineLevel, { ...CFG, boardSize: 4, maxValue: 9 }, 31);
+  assert.strictEqual(game.rowQuotas.length, 4);
+  assert.strictEqual(game.colQuotas.length, 4);
+  for (const q of [...game.rowQuotas, ...game.colQuotas]) {
+    assert.ok(q >= 1 && q <= 9, `quota ${q} out of range`);
+  }
+  assert.ok(game.rowChecked.every((v) => v === false));
 });
 
-t('filling every bar to capacity wins the run', () => {
+t('a lowered maxValue keeps quotas reachable', () => {
+  const game = createGame(lineLevel, { ...CFG, boardSize: 3, maxValue: 4 }, 77);
+  for (const q of [...game.rowQuotas, ...game.colQuotas]) assert.ok(q <= 4, `quota ${q} > cap`);
+});
+
+t('a match at or above the quota checks that line; below it does not', () => {
   const board = createBoard(3);
-  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 9; // 81 each
-  const config = { ...CFG, boardSize: 3, barCapacity: 80 };
-  const game = { ...createGame(lineLevel, config, 1), board, bars: [0, 0, 0] };
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const config = { ...CFG, boardSize: 3 };
+  const base = createGame(lineLevel, config, 1);
   const block = createBlock('DOT', ['plus1']);
-  game.hand = [block];
-  const result = placeBlock(lineLevel, game, block.id, 0, 0);
+
+  const meets = { ...base, board, rowQuotas: [9, 4, 9], colQuotas: [9, 9, 9], hand: [block] };
+  const metResult = placeBlock(lineLevel, meets, block.id, 2, 2);
+  assert.strictEqual(metResult.state.rowChecked[1], true, 'quota 4, match 4 -> met');
+  assert.deepStrictEqual(metResult.state.colChecked, [false, false, false], 'a row match does not check columns');
+
+  const board2 = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board2, 1, c).value = 4;
+  const misses = { ...base, board: board2, rowQuotas: [9, 5, 9], colQuotas: [9, 9, 9], hand: [createBlock('DOT', ['plus1'])] };
+  const missResult = placeBlock(lineLevel, misses, misses.hand[0].id, 2, 2);
+  assert.strictEqual(missResult.state.rowChecked[1], false, 'quota 5, match 4 -> not met');
+});
+
+t('a checkmark is permanent once earned', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const base = createGame(lineLevel, { ...CFG, boardSize: 3 }, 1);
+  const block = createBlock('DOT', ['plus1']);
+  const game = { ...base, board, rowQuotas: [9, 4, 9], colQuotas: [9, 9, 9], rowChecked: [false, true, false], hand: [block] };
+  const result = placeBlock(lineLevel, game, block.id, 2, 2);
+  assert.strictEqual(result.state.rowChecked[1], true);
+});
+
+t('checking every row and column quota wins the run', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const base = createGame(lineLevel, { ...CFG, boardSize: 3 }, 1);
+  const game = {
+    ...base,
+    board,
+    rowQuotas: [1, 4, 1],
+    colQuotas: [1, 1, 1],
+    rowChecked: [true, false, true],
+    colChecked: [true, true, true],
+    hand: [createBlock('DOT', ['plus1'])],
+  };
+  const result = placeBlock(lineLevel, game, game.hand[0].id, 2, 2);
+  assert.strictEqual(result.state.rowChecked[1], true, 'last outstanding quota met');
   assert.strictEqual(result.state.won, true);
   assert.strictEqual(result.state.gameOver, true);
+});
+
+t('order board attributes a bank to both the row and the column it sat on', () => {
+  const board = createBoard(3);
+  cellAt(board, 2, 1).value = 3;
+  const placement = { changedCells: [{ r: 2, c: 1, op: 'plus1', prevValue: 2, value: 3 }] };
+  const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
+  assert.deepStrictEqual(result.scoredLines, [
+    { kind: 'row', index: 2, value: 3 },
+    { kind: 'col', index: 1, value: 3 },
+  ]);
 });
 
 t('striking out beats filling the bars on the same placement', () => {
   const board = createBoard(3);
   for (const cell of board.cells) cell.value = 9; // every line uniform, and capped
-  const config = { ...CFG, boardSize: 3, maxValue: 9, maxStrikes: 1, barCapacity: 10 };
-  const game = { ...createGame(lineLevel, config, 1), board, bars: [0, 0, 0] };
+  const config = { ...CFG, boardSize: 3, maxValue: 9, maxStrikes: 1 };
+  const game = {
+    ...createGame(lineLevel, config, 1),
+    board,
+    rowQuotas: [1, 1, 1],
+    colQuotas: [1, 1, 1],
+    rowChecked: [false, false, false],
+    colChecked: [false, false, false],
+  };
   const block = createBlock('DOT', ['plus1']); // 9 -> 10, strikes, resets to 9
   game.hand = [block];
   const result = placeBlock(lineLevel, game, block.id, 0, 0);
   assert.strictEqual(result.state.strikes, 1);
-  assert.ok(result.state.bars.every((b) => b >= 10), 'bars did fill too');
+  assert.ok([...result.state.rowChecked, ...result.state.colChecked].every(Boolean), 'quotas were met too');
   assert.strictEqual(result.state.won, false, 'the strike lands first, so it is a loss');
   assert.strictEqual(result.state.gameOver, true);
 });
@@ -254,12 +307,13 @@ t('generated shapes always fit the configured board', () => {
 
 // ---- board setup -----------------------------------------------------
 
-t('board size is driven by config and gets one bar per column', () => {
+t('board size is driven by config and gets one quota per row and column', () => {
   for (const size of [2, 3, 5]) {
     const game = createGame(lineLevel, { ...CFG, boardSize: size }, 5);
     assert.strictEqual(game.board.size, size);
     assert.strictEqual(game.board.cells.length, size * size);
-    assert.strictEqual(game.bars.length, size);
+    assert.strictEqual(game.rowQuotas.length, size);
+    assert.strictEqual(game.colQuotas.length, size);
   }
 });
 

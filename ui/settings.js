@@ -26,7 +26,6 @@ export function defaultSettings() {
     startValue: baseConfig.startValue,
     maxValue: baseConfig.maxValue,
     maxStrikes: baseConfig.maxStrikes,
-    barCapacity: baseConfig.barCapacity,
     blockSizeWeights: { ...baseConfig.blockSizeWeights },
     operatorWeights: { ...baseConfig.operatorWeights },
   };
@@ -66,7 +65,6 @@ function sanitize(raw) {
     startValue,
     maxValue: intOr(raw.maxValue, defaults.maxValue, 1),
     maxStrikes: intOr(raw.maxStrikes, defaults.maxStrikes, 1),
-    barCapacity: intOr(raw.barCapacity, defaults.barCapacity, 1),
     blockSizeWeights: sanitizeWeights(
       raw.blockSizeWeights,
       BLOCK_SIZES,
@@ -115,7 +113,6 @@ export function applySettings(config, settings) {
     startValue: settings.startValue,
     maxValue: settings.maxValue,
     maxStrikes: settings.maxStrikes,
-    barCapacity: settings.barCapacity,
     blockSizeWeights: { ...settings.blockSizeWeights },
     operatorWeights: { ...settings.operatorWeights },
   };

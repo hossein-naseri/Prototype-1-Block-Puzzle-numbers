@@ -62,39 +62,37 @@ export function renderBoard(boardEl, board, onCellPointerEnter, onCellPointerUp,
   }
 }
 
-// One vertical bar per column, sitting directly above it and filling from
-// the bottom as that column's tiles are scored.
-export function renderScoreBars(barsEl, bars, capacity, boardSize) {
-  barsEl.style.gridTemplateColumns = `repeat(${boardSize}, 1fr)`;
-  barsEl.innerHTML = '';
-  for (let c = 0; c < boardSize; c++) {
-    const fill = bars[c] || 0;
-    const pct = Math.min(100, (fill / capacity) * 100);
-
-    const track = document.createElement('div');
-    track.className = 'bar-track';
-    track.dataset.c = c;
-    if (fill >= capacity) track.classList.add('full');
-
-    const fillEl = document.createElement('div');
-    fillEl.className = 'bar-fill';
-    fillEl.style.height = `${pct}%`;
-
-    const labelEl = document.createElement('div');
-    labelEl.className = 'bar-label';
-    labelEl.textContent = `${Math.min(fill, capacity)}`;
-
-    track.append(fillEl, labelEl);
-    barsEl.appendChild(track);
-  }
+// Quota chips: one down the left of the rows, one under each column. Each
+// shows the value a match on that line has to reach; once met it flips to a
+// checkmark and stays that way.
+export function renderQuotas(el, quotas, checked, kind) {
+  const vertical = kind === 'row';
+  el.style[vertical ? 'gridTemplateRows' : 'gridTemplateColumns'] = `repeat(${quotas.length}, 1fr)`;
+  el.innerHTML = '';
+  quotas.forEach((quota, index) => {
+    const chip = document.createElement('div');
+    chip.className = 'quota-chip';
+    chip.dataset.kind = kind;
+    chip.dataset.index = index;
+    if (checked[index]) {
+      chip.classList.add('checked');
+      chip.textContent = '✓';
+      chip.title = `${kind === 'row' ? 'Row' : 'Column'} ${index + 1}: met (needed ${quota})`;
+    } else {
+      chip.textContent = String(quota);
+      chip.title = `${kind === 'row' ? 'Row' : 'Column'} ${index + 1}: needs a match of ${quota} or higher`;
+    }
+    el.appendChild(chip);
+  });
 }
 
-export function pulseBars(barsEl, columns) {
-  for (const c of columns) {
-    const el = barsEl.querySelector(`.bar-track[data-c="${c}"]`);
-    if (el) {
-      el.classList.add('bar-pop');
-      setTimeout(() => el.classList.remove('bar-pop'), 400);
+export function pulseQuotas(rowEl, colEl, lines) {
+  for (const { kind, index } of lines) {
+    const host = kind === 'row' ? rowEl : colEl;
+    const chip = host.querySelector(`.quota-chip[data-index="${index}"]`);
+    if (chip) {
+      chip.classList.add('quota-pop');
+      setTimeout(() => chip.classList.remove('quota-pop'), 500);
     }
   }
 }

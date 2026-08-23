@@ -176,59 +176,68 @@ body {
   text-align: center;
 }
 
-/* Bars sit directly above the board and share its column track sizing, so
-   each bar lines up with the column it belongs to. */
-#bars-wrap, #board {
+/* The board sits inside a frame: row quotas run down the left, column
+   quotas along the bottom. Both strips share the board's track sizing and
+   gap, so every chip lines up with its line. */
+#board-frame {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 6px;
   width: min(92vw, 420px);
 }
 
-#score-bars {
+#row-quotas {
+  grid-column: 1;
+  grid-row: 1;
   display: grid;
   gap: 6px;
-  height: 72px;
-}
-
-.bar-track {
-  position: relative;
-  background: var(--cell-zero);
-  border: 1px solid #2f3547;
-  border-radius: 6px 6px 3px 3px;
-  overflow: hidden;
-  display: flex;
-  align-items: flex-end;
-}
-
-.bar-fill {
-  width: 100%;
-  background: linear-gradient(to top, var(--legal), var(--accent));
-  transition: height 0.25s ease-out;
-}
-
-.bar-label {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--text);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-}
-
-.bar-track.full { border-color: var(--legal); }
-.bar-track.bar-pop { animation: barPop 0.4s; }
-
-@keyframes barPop {
-  0% { transform: scaleY(1); box-shadow: 0 0 0 0 var(--accent); }
-  40% { transform: scaleY(1.06); box-shadow: 0 0 10px 2px var(--accent); }
-  100% { transform: scaleY(1); box-shadow: 0 0 0 0 transparent; }
 }
 
 #board {
+  grid-column: 2;
+  grid-row: 1;
   display: grid;
   gap: 6px;
   aspect-ratio: 1;
+}
+
+#frame-corner { grid-column: 1; grid-row: 2; }
+
+#col-quotas {
+  grid-column: 2;
+  grid-row: 2;
+  display: grid;
+  gap: 6px;
+}
+
+.quota-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 8px;
+  background: var(--cell-zero);
+  border: 1px solid #2f3547;
+  color: var(--muted);
+  font-size: clamp(0.85rem, 4vw, 1.2rem);
+  font-weight: 700;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.quota-chip.checked {
+  background: color-mix(in srgb, var(--legal) 25%, var(--cell-zero));
+  border-color: var(--legal);
+  color: var(--legal);
+}
+
+.quota-chip.quota-pop { animation: quotaPop 0.5s; }
+
+@keyframes quotaPop {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 var(--legal); }
+  40% { transform: scale(1.18); box-shadow: 0 0 12px 3px var(--legal); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
 }
 
 .cell {
