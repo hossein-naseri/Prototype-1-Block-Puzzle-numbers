@@ -58,15 +58,33 @@ export const variantConfigs = {
     startTarget: 3,
     incrementEvery: 5,
   },
+  fight: {
+    ...baseConfig,
+
+    // Tiles may go negative here - a negative tile is a red one, drawn as
+    // its magnitude without a minus sign. Turns off the clamp-at-0 rule and
+    // the strike cap; Fight has its own win/lose.
+    signedValues: true,
+
+    // TUNABLE. How many tiles get threatened at the start of each turn, and
+    // the most red triangles any one of them can carry.
+    threatsPerTurn: 3,
+    threatMaxStacks: 2,
+
+    // TUNABLE. Share of the board one side must hold to end the run. On a
+    // 3x3 that's 9 * 0.7 = 6.3, so 7 tiles.
+    controlThreshold: 0.7,
+  },
 };
 
 export function getConfig(variantName) {
   return variantConfigs[variantName] || variantConfigs.lineLevel;
 }
 
-export const VARIANT_NAMES = ['lineLevel', 'orderBoard'];
+export const VARIANT_NAMES = ['lineLevel', 'orderBoard', 'fight'];
 
 export const VARIANT_LABELS = {
   lineLevel: 'Line Level',
   orderBoard: 'Order Board',
+  fight: 'Fight Mode',
 };

@@ -24,26 +24,41 @@ HTML/JS, no framework, no build step, deploys as a static site.
 ### Number rules
 
 Both ends of the range are enforced in core (`core/resolve.js`), because
-they're properties of the numbers rather than of any variant:
+they're properties of the numbers rather than of any variant. There are two
+modes, picked by the variant via `config.signedValues`:
 
-- **Bottom — always clamps.** A `-1` that would take a tile below 0 is a
-  legal placement; the tile simply floors at 0.
+**Unsigned** (Line Level, Order Board):
+
+- **Bottom — clamps.** A `-1` that would take a tile below 0 is a legal
+  placement; the tile simply floors at 0.
 - **Top — costs a strike.** A tile pushed above `maxValue` (default **9**)
-  gives the player one strike and is reset to exactly `maxValue`. One
-  strike per tile, however far over it went. At `maxStrikes` (default
-  **5**), the run is lost.
+  gives the player one strike and is reset to exactly `maxValue`. One strike
+  per tile, however far over it went. At `maxStrikes` (default **5**), the
+  run is lost.
+
+**Signed** (Fight Mode):
+
+- A tile may go negative — a negative tile is a **red** tile, drawn as its
+  magnitude with no minus sign. Only the magnitude is capped, at `maxValue`
+  in either direction, and no strikes are charged; Fight has its own
+  win/lose condition.
 
 ### Placement legality
 
 A placement is legal only if **every** covered cell is legal:
 
 - The whole block must fit inside the board.
-- `÷2` requires an even value. (Zero is fine — `0 ÷ 2 = 0`, a harmless
-  no-op. Blocking it would leave `÷2` blocks unplayable on an empty board.)
-  A fractional tile isn't representable, so this is the one hard
-  restriction left.
+- `÷2` halves anything, rounding the **magnitude** down: `5 ÷ 2 = 2`, and a
+  red 5 becomes a red 2. Truncating toward zero rather than flooring keeps
+  ÷2 a weakening move for both colours — flooring would push a red tile
+  further from zero, which reads backwards.
 - A stone-locked cell (Order Board) only accepts its `allowedOps`.
 - Any cell failing its check fails the entire placement — no partial apply.
+
+No value makes an operator illegal any more. Since `÷2` handles odd numbers,
+the only thing that can reject a placement is geometry (out of bounds), a
+blocked cell, or an Order Board stone. This also retired the `÷2` dead end
+that used to end most Line Level runs.
 
 Pushing a tile over the cap is deliberately **legal**: it costs a strike
 rather than being rejected. The UI previews such placements in amber with a
@@ -86,8 +101,9 @@ chance to score anything, so it lands first and the loss takes precedence.
 
 ## Variants
 
-Both sit on the identical core; they differ only in what counts as a match
-on a line, and therefore when a quota gets checked.
+Line Level and Order Board sit on the quota system and differ only in what
+counts as a match on a line. Fight Mode opts out of quotas entirely
+(`usesLineQuotas: false`) and brings its own win condition.
 
 ### Line Level
 A row or column matches when every tile in it is equal and non-zero. The
@@ -108,6 +124,60 @@ emptied. That has two consequences worth knowing:
 
 Because tiles are no longer consumed, a tile sitting where two lines match
 simultaneously scores for both — each line match is its own event.
+
+### Fight Mode
+A two-sided territory fight. Tile values are **signed**: positive is
+**green** (the player), negative is **red** (the opponent), 0 is neutral. A
+red tile is drawn as its magnitude in red with no minus sign, so "red 2" is
+the value `-2`. Everything is ordinary signed arithmetic, which makes the
+operators read naturally from either side — `+1` pushes a tile toward green,
+`-1` toward red, `×2` doubles whoever holds it, `÷2` halves them.
+
+**The turn.** Unlike the other modes, a turn here is all three blocks, not
+one placement:
+
+1. At the start of a turn, `threatsPerTurn` (default **3**) tiles are picked
+   at random and marked with 1–`threatMaxStacks` (default **2**) red
+   triangles in their top-left corner — a visible warning of what's coming.
+2. The player places all three blocks.
+3. At the end of the turn each marked tile takes that many points of red
+   pressure (`-1` per triangle). A 0 becomes a red 1; a red 1 becomes a red
+   2; a green 3 drops to a green 2.
+4. The board re-resolves, next turn's threats are rolled, and a fresh hand
+   is dealt.
+
+The engine calls this end-of-turn phase through an `onTurnEnd` hook, which
+fires when the last block of a hand is placed and before the next hand is
+dealt — so the new hand is judged against the resolved board.
+
+**Conversion.** A tile flips colour when **at least 2 of its 4 orthogonal
+neighbours** are the opposing colour with magnitude ≥ its own. The flipped
+tile keeps its magnitude and only changes sign — a red 3 surrounded by two
+green 3s becomes a green 3. This works both ways: red converts green by the
+same rule.
+
+The brief phrases the surround as "one cell on either side, or one
+horizontal and one vertical". Between them those cover all 6 pairs drawn
+from 4 orthogonal neighbours, so the rule reduces to "any two of them" —
+which is also what lets corner tiles (only two neighbours, one horizontal
+and one vertical) be converted at all.
+
+Two details not spelled out in the brief, resolved this way:
+
+- **Neutral 0 tiles neither convert nor are converted.** They have no
+  colour, so they can't be a target and can't count toward surrounding one.
+- **Flips are simultaneous, and don't cascade.** Every tile is judged
+  against a snapshot and all flips apply together, so the result doesn't
+  depend on scan order and neither colour gets to move first. A flip that
+  newly enables another waits for the next resolution rather than chaining.
+
+Conversion is checked after every placement and again after the threats
+land.
+
+**Win / lose.** Whichever side holds more than `controlThreshold` (default
+**70%**) of the tiles ends the run — green wins, red loses. On a 3×3 that's
+`floor(9 × 0.7) + 1 = 7` tiles. A dead end isn't reachable in this mode,
+since every placement is legal.
 
 ### Order Board
 A target number is shown, starting at `startTarget` (default 3). A tile
@@ -187,6 +257,10 @@ editable live from the in-page Settings panel.
 | `handSize` | 3 | blocks offered per hand (not exposed in the panel) |
 | `orderBoard.startTarget` | 3 | starting target number |
 | `orderBoard.incrementEvery` | 5 | banks per target increment |
+| `fight.signedValues` | true | negative tiles allowed (red); no clamp at 0, no strikes |
+| `fight.threatsPerTurn` | 3 | tiles marked with red triangles each turn |
+| `fight.threatMaxStacks` | 2 | most triangles any one tile can carry |
+| `fight.controlThreshold` | 0.7 | share of the board that ends the run |
 
 Weights are **relative, not percentages** — the RNG normalizes them, so
 they never have to sum to 100. The panel shows the resulting percentage
@@ -205,6 +279,33 @@ over 60 seeds, `15/25/60` ended **56/60** runs with an unplaceable last
 block, versus **34/60** at the shipped `30/45/25`. On a larger board the
 3-tile shapes breathe again and a heavier 3 mix is reasonable.
 
+### Fight Mode is heavily red-favoured at the specified defaults
+
+Simulating a control-maximising bot over 60 seeds at the brief's numbers
+(3 threatened tiles per turn, 1–2 triangles each), **red wins 59/60** —
+average final board 0.6 green vs 7.0 red, over ~7 rounds.
+
+The arithmetic is one-sided: red applies 3–6 points of pressure every turn
+(3 tiles × 1–2), while a hand of 3 blocks carries only a couple of `+1`
+cells at the default operator weights. Green simply can't out-produce it.
+
+The two threat knobs are a clean difficulty dial, though — same bot, same
+seeds:
+
+| threats/turn | max triangles | green wins |
+|---|---|---|
+| 1 | 1 | 53/60 |
+| 1 | 2 | 34/60 |
+| 2 | 1 | 29/60 |
+| 2 | 2 | 16/60 |
+| 3 | 1 | 6/60 |
+| 3 | 2 (default) | 1/60 |
+
+The defaults are left exactly as specified. Both knobs are in the settings
+panel, so `threats=2, maxStacks=1` is one edit away if you want a fair
+fight, or `1/1` for a gentle one. Raising the `+1` operator weight is the
+other lever.
+
 ### Known problem: the ÷2 dead end
 
 Keeping matched values fixed the structural issue that used to make Line
@@ -216,6 +317,12 @@ entirely:
 **53 of 60 Line Level runs ended with no legal move — and in 100% of those,
 every remaining block in hand carried a `÷2` with no even tile to land it
 on.** Not the quota design; the `÷2`-needs-an-even-value rule.
+
+**This is now fixed.** `÷2` halves odd values (rounding the magnitude
+down), so it is legal on any tile and the dead end can't occur — that was
+option 3 of the three listed below, adopted as part of the Fight Mode work
+because Fight needed `÷2` to work on arbitrary values anyway. The rest of
+this section is kept as the record of what the problem was.
 
 It got worse with this change, and predictably so: values used to be reset
 to 0 (even) on every match, which constantly replenished legal `÷2` targets.

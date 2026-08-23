@@ -1,4 +1,4 @@
-import { createBoard, applyMutations } from './board.js';
+import { createBoard, createStartingBoard, applyMutations } from './board.js';
 import { generateHand, absoluteCells } from './blocks.js';
 import { canPlace, noLegalPlacements, anyPlacementForBlock } from './legality.js';
 import { applyPlacement } from './resolve.js';
@@ -11,7 +11,7 @@ import { SeededRng } from './rng.js';
 // convert to score and when, and reports them back.
 //
 // Variant interface:
-//   init(config, rng) -> { board?, variantState }                   (optional)
+//   init(config, rng, board) -> { board?, variantState }            (optional)
 //   getNextHand(rng, config, variantState) -> { hand, variantState } (optional)
 //   onPlacementResolved(board, placement, variantState, config)
 //       -> { mutations, scoredTiles, scoredLines, events, variantState? }
@@ -24,6 +24,16 @@ import { SeededRng } from './rng.js';
 //            counts: Line Level reports the line it cleared; Order Board
 //            reports both the row and the column a banked tile sat on,
 //            since it scores single tiles rather than lines.
+//   onTurnEnd(board, variantState, config, rng)                     (optional)
+//       -> { mutations, events, variantState? }
+//       Fires once the last block of a hand is placed, before the next hand
+//       is dealt. Fight mode uses it for the phase where queued red threats
+//       land and the board re-resolves.
+//   getOutcome(board, variantState, config)                          (optional)
+//       -> { won?, lost?, reason? } - a variant-owned win/lose condition,
+//       for modes that don't use the row/column quotas.
+//   usesLineQuotas: false                                            (optional)
+//       Opts out of the quota system entirely (rolling, checking, winning).
 //   isGameOver(board, hand, variantState, config) -> bool           (optional)
 //   getHudState(board, variantState, config) -> {}                  (optional)
 
@@ -52,24 +62,6 @@ function dealHand(variant, rng, config, variantState, board) {
   return drawn;
 }
 
-// Per-tile starting value. 'random' picks strictly between 0 and maxValue,
-// excluding both ends, so no tile starts already at zero or already capped.
-function applyStartValues(board, config, rng) {
-  const startValue = config.startValue ?? 0;
-  if (startValue === 0) return board;
-
-  const maxValue = config.maxValue ?? 9;
-  for (const cell of board.cells) {
-    if (startValue === 'random') {
-      const span = maxValue - 1; // candidates are 1 .. maxValue-1
-      cell.value = span >= 1 ? 1 + rng.int(span) : 0;
-    } else {
-      cell.value = Math.min(startValue, maxValue);
-    }
-  }
-  return board;
-}
-
 // Squared tile value is the score formula: a scored 4 is worth 16.
 export function tileScore(value) {
   return value * value;
@@ -90,25 +82,22 @@ function allChecked(rowChecked, colChecked) {
 
 export function createGame(variant, config, seed) {
   const rng = new SeededRng(seed);
-  let board = createBoard(config.boardSize);
+  // The starting board is built up front so init() can inspect it - Fight
+  // needs it to roll the opening turn's threats.
+  let board = createStartingBoard(config, rng);
   let variantState = {};
-  let usedVariantBoard = false;
 
   if (variant.init) {
-    const initResult = variant.init(config, rng) || {};
-    if (initResult.board) {
-      board = initResult.board;
-      usedVariantBoard = true;
-    }
+    const initResult = variant.init(config, rng, board) || {};
+    if (initResult.board) board = initResult.board;
     if (initResult.variantState) variantState = initResult.variantState;
   }
 
-  if (!usedVariantBoard) applyStartValues(board, config, rng);
-
   // Rolled before the hands are dealt so the whole setup is reproducible
-  // from the seed.
-  const rowQuotas = rollQuotas(rng, board.size, config.maxValue);
-  const colQuotas = rollQuotas(rng, board.size, config.maxValue);
+  // from the seed. Variants that own their own win condition skip them.
+  const usesQuotas = variant.usesLineQuotas !== false;
+  const rowQuotas = usesQuotas ? rollQuotas(rng, board.size, config.maxValue) : [];
+  const colQuotas = usesQuotas ? rollQuotas(rng, board.size, config.maxValue) : [];
 
   const first = dealHand(variant, rng, config, variantState, board);
   variantState = first.variantState;
@@ -130,8 +119,8 @@ export function createGame(variant, config, seed) {
     variantState,
     rowQuotas,
     colQuotas,
-    rowChecked: new Array(board.size).fill(false),
-    colChecked: new Array(board.size).fill(false),
+    rowChecked: new Array(rowQuotas.length).fill(false),
+    colChecked: new Array(colQuotas.length).fill(false),
     strikes: 0,
     score: 0,
     turns: 0,
@@ -152,7 +141,7 @@ export function previewPlacement(state, blockId, anchorR, anchorC) {
   // A placement can be perfectly legal and still cost strikes. The UI warns
   // before the player commits, so the cap is a visible tradeoff.
   let strikes = 0;
-  if (legal) {
+  if (legal && !state.config.signedValues) {
     for (const { r, c, op } of absCells) {
       const cell = state.board.cells[r * state.board.size + c];
       if (opWouldStrike(op, cell.value, state.config.maxValue)) strikes += 1;
@@ -180,7 +169,7 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
   const { board: boardAfterCore, changedCells, strikesAdded } = applyPlacement(
     state.board,
     absCells,
-    state.config.maxValue
+    state.config
   );
   const placement = { block, absCells, changedCells };
 
@@ -219,36 +208,54 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
 
   let hand = state.hand.filter((b) => b.id !== blockId);
   let nextHand = state.nextHand;
+  let boardAfterTurn = finalBoard;
+
   if (hand.length === 0) {
-    hand = nextHand;
-    if (!variant.getNextHand && !handIsPlayable(finalBoard, hand)) {
-      hand = dealHand(variant, state.rng, state.config, variantState, finalBoard).hand;
+    // The hand is spent, so the turn is over. Give the variant its end-of-
+    // turn phase (Fight lands its queued red threats here) *before* the next
+    // hand is dealt, so the new hand is judged against the resolved board.
+    if (variant.onTurnEnd) {
+      const turnResult = variant.onTurnEnd(boardAfterTurn, variantState, state.config, state.rng) || {};
+      boardAfterTurn = applyMutations(boardAfterTurn, turnResult.mutations || []);
+      events.push(...(turnResult.events || []));
+      if (turnResult.variantState) variantState = turnResult.variantState;
     }
-    const drawn = dealHand(variant, state.rng, state.config, variantState, finalBoard);
+
+    hand = nextHand;
+    if (!variant.getNextHand && !handIsPlayable(boardAfterTurn, hand)) {
+      hand = dealHand(variant, state.rng, state.config, variantState, boardAfterTurn).hand;
+    }
+    const drawn = dealHand(variant, state.rng, state.config, variantState, boardAfterTurn);
     nextHand = drawn.hand;
     variantState = drawn.variantState;
   }
 
-  // A placement can both fill the last bar and take the final strike. The
+  // A placement can both satisfy the win and take the final strike. The
   // strike is applied during operator resolution, before the variant gets a
   // chance to score anything, so it lands first and the loss takes
   // precedence over the win.
-  const lostToStrikes = strikes >= state.config.maxStrikes;
-  const won = !lostToStrikes && allChecked(rowChecked, colChecked);
+  const lostToStrikes = !state.config.signedValues && strikes >= state.config.maxStrikes;
+  const outcome = variant.getOutcome
+    ? variant.getOutcome(boardAfterTurn, variantState, state.config) || {}
+    : {};
+  const quotaWin = variant.usesLineQuotas !== false && allChecked(rowChecked, colChecked);
+  const won = !lostToStrikes && !outcome.lost && (quotaWin || outcome.won === true);
   const stuck = variant.isGameOver
-    ? variant.isGameOver(finalBoard, hand, variantState, state.config)
+    ? variant.isGameOver(boardAfterTurn, hand, variantState, state.config)
     : false;
-  const gameOver = won || lostToStrikes || stuck;
+  const gameOver = won || lostToStrikes || outcome.lost === true || stuck;
 
   if (lostToStrikes) events.push({ type: 'strikeOut', strikes });
-  if (won) events.push({ type: 'win' });
+  if (outcome.lost === true) events.push({ type: 'defeat', reason: outcome.reason });
+  if (won) events.push({ type: 'win', reason: outcome.reason });
 
   const nextState = {
     ...state,
-    board: finalBoard,
+    board: boardAfterTurn,
     hand,
     nextHand,
     variantState,
+    outcomeReason: outcome.reason || null,
     rowChecked,
     colChecked,
     strikes,

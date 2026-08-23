@@ -45,6 +45,9 @@ const exportBtn = document.getElementById('export-log');
 const boardSizeEl = document.getElementById('set-board-size');
 const maxValueEl = document.getElementById('set-max-value');
 const maxStrikesEl = document.getElementById('set-max-strikes');
+const threatsPerTurnEl = document.getElementById('set-threats-per-turn');
+const threatMaxStacksEl = document.getElementById('set-threat-max-stacks');
+const controlThresholdEl = document.getElementById('set-control-threshold');
 const startValueEl = document.getElementById('set-start-value');
 const startRandomEl = document.getElementById('set-start-random');
 const blockSizeRowsEl = document.getElementById('block-size-rows');
@@ -105,22 +108,37 @@ function startGame() {
     maxStrikes: config.maxStrikes,
     blockSizeWeights: config.blockSizeWeights,
     operatorWeights: config.operatorWeights,
+    threatsPerTurn: config.threatsPerTurn ?? null,
+    threatMaxStacks: config.threatMaxStacks ?? null,
+    controlThreshold: config.controlThreshold ?? null,
   });
   render();
 }
 
 function render() {
+  const usesQuotas = variant.usesLineQuotas !== false;
   renderBoard(
     boardEl,
     state.board,
-    (r, c) => onCellHover(r, c),
-    (r, c) => onCellDrop(r, c),
-    (r, c) => onCellClick(r, c)
+    {
+      onCellPointerEnter: (r, c) => onCellHover(r, c),
+      onCellPointerUp: (r, c) => onCellDrop(r, c),
+      onCellClick: (r, c) => onCellClick(r, c),
+    },
+    state.variantState.threats || null
   );
-  renderQuotas(rowQuotasEl, state.rowQuotas, state.rowChecked, 'row');
-  renderQuotas(colQuotasEl, state.colQuotas, state.colChecked, 'col');
+
+  rowQuotasEl.hidden = !usesQuotas;
+  colQuotasEl.hidden = !usesQuotas;
+  if (usesQuotas) {
+    renderQuotas(rowQuotasEl, state.rowQuotas, state.rowChecked, 'row');
+    renderQuotas(colQuotasEl, state.colQuotas, state.colChecked, 'col');
+  }
+
   renderHand();
   scoreEl.textContent = String(state.score);
+  // Strikes don't exist in the signed modes - Fight has its own win/lose.
+  strikesReadoutEl.hidden = Boolean(config.signedValues);
   strikesEl.textContent = `${state.strikes} / ${config.maxStrikes}`;
   strikesReadoutEl.classList.toggle('danger', state.strikes >= config.maxStrikes - 1);
   turnsEl.textContent = String(state.turns);
@@ -130,8 +148,12 @@ function render() {
     gameOverEl.hidden = false;
     gameOverEl.classList.toggle('win', state.won);
     if (state.won) {
-      gameOverEl.textContent = `All quotas met — you win! ${state.turns} turns`;
-    } else if (state.strikes >= config.maxStrikes) {
+      gameOverEl.textContent = state.outcomeReason
+        ? `You win — ${state.outcomeReason}`
+        : `All quotas met — you win! ${state.turns} turns`;
+    } else if (state.outcomeReason) {
+      gameOverEl.textContent = `Defeat — ${state.outcomeReason}`;
+    } else if (!config.signedValues && state.strikes >= config.maxStrikes) {
       gameOverEl.textContent = `${state.strikes} strikes — out. Score ${state.score}`;
     } else {
       gameOverEl.textContent = `No legal moves left. Score ${state.score}`;
@@ -209,6 +231,11 @@ function commitPlacement(blockId, r, c) {
 
   const met = result.events.find((e) => e.type === 'quotaMet');
   if (met) pulseQuotas(rowQuotasEl, colQuotasEl, met.lines);
+
+  const converted = result.events.find((e) => e.type === 'convert');
+  if (converted) flashCells(boardEl, converted.flips);
+  const landed = result.events.find((e) => e.type === 'threatLanded');
+  if (landed) flashCells(boardEl, landed.cells, 'strike-flash');
 }
 
 // Minimal drag support: pointerdown on a hand slot starts a drag; the board
@@ -269,6 +296,11 @@ function renderSettingsPanel() {
   boardSizeEl.value = String(settings.boardSize);
   maxValueEl.value = String(settings.maxValue);
   maxStrikesEl.value = String(settings.maxStrikes);
+  threatsPerTurnEl.value = String(settings.threatsPerTurn);
+  threatMaxStacksEl.value = String(settings.threatMaxStacks);
+  controlThresholdEl.value = String(settings.controlPercent);
+  // The Fight-only knobs are dead weight in the other modes.
+  for (const el of document.querySelectorAll('.fight-only')) el.hidden = variantName !== 'fight';
 
   const isRandom = settings.startValue === 'random';
   startRandomEl.checked = isRandom;
@@ -300,6 +332,9 @@ function bindNumberSetting(el, key, min) {
 bindNumberSetting(boardSizeEl, 'boardSize', 2);
 bindNumberSetting(maxValueEl, 'maxValue', 1);
 bindNumberSetting(maxStrikesEl, 'maxStrikes', 1);
+bindNumberSetting(threatsPerTurnEl, 'threatsPerTurn', 0);
+bindNumberSetting(threatMaxStacksEl, 'threatMaxStacks', 1);
+bindNumberSetting(controlThresholdEl, 'controlPercent', 1);
 bindNumberSetting(startValueEl, 'startValue', 0);
 
 startRandomEl.addEventListener('change', () => {
@@ -314,6 +349,7 @@ settingsResetEl.addEventListener('click', () => {
 
 variantSelectEl.addEventListener('change', () => {
   variantName = variantSelectEl.value;
+  renderSettingsPanel();
   startGame();
 });
 

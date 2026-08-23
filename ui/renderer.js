@@ -36,7 +36,11 @@ export function renderBlockGlyph(block) {
   return el;
 }
 
-export function renderBoard(boardEl, board, onCellPointerEnter, onCellPointerUp, onCellClick) {
+// `threats` is an optional { "r,c": stacks } map (Fight mode). Each stack
+// draws one red triangle in the tile's top-left corner, flagging red
+// pressure that lands at the end of the turn.
+export function renderBoard(boardEl, board, handlers, threats = null) {
+  const { onCellPointerEnter, onCellPointerUp, onCellClick } = handlers;
   boardEl.style.gridTemplateColumns = `repeat(${board.size}, 1fr)`;
   boardEl.style.gridTemplateRows = `repeat(${board.size}, 1fr)`;
   boardEl.innerHTML = '';
@@ -50,9 +54,22 @@ export function renderBoard(boardEl, board, onCellPointerEnter, onCellPointerUp,
       if (cell.blocked) {
         cellEl.classList.add('blocked');
       } else {
-        cellEl.textContent = String(cell.value);
+        // A negative value is a red tile, shown as its magnitude with no
+        // minus sign; positive is green; 0 is neutral.
+        cellEl.textContent = String(Math.abs(cell.value));
         if (cell.allowedOps) cellEl.classList.add('locked');
         if (cell.value === 0) cellEl.classList.add('zero');
+        else if (cell.value < 0) cellEl.classList.add('red-tile');
+        else cellEl.classList.add('green-tile');
+
+        const stacks = threats ? threats[`${r},${c}`] : 0;
+        if (stacks > 0) {
+          const flagEl = document.createElement('div');
+          flagEl.className = 'threat-flags';
+          flagEl.textContent = '▲'.repeat(stacks);
+          flagEl.title = `${stacks} red pressure lands here at end of turn`;
+          cellEl.appendChild(flagEl);
+        }
       }
       cellEl.addEventListener('pointerenter', () => onCellPointerEnter(r, c));
       cellEl.addEventListener('pointerup', () => onCellPointerUp(r, c));

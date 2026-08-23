@@ -21,6 +21,26 @@ export function createBoard(size) {
   return { size, cells };
 }
 
+// Build the board a run starts from. Per-tile starting value: 'random'
+// picks strictly between 0 and maxValue, excluding both ends, so no tile
+// starts already at zero or already capped.
+export function createStartingBoard(config, rng) {
+  const board = createBoard(config.boardSize);
+  const startValue = config.startValue ?? 0;
+  if (startValue === 0) return board;
+
+  const maxValue = config.maxValue ?? 9;
+  for (const cell of board.cells) {
+    if (startValue === 'random') {
+      const span = maxValue - 1; // candidates are 1 .. maxValue-1
+      cell.value = span >= 1 ? 1 + rng.int(span) : 0;
+    } else {
+      cell.value = Math.min(startValue, maxValue);
+    }
+  }
+  return board;
+}
+
 export function cellAt(board, r, c) {
   return board.cells[idx(board.size, r, c)];
 }
