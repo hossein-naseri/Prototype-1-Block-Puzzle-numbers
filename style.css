@@ -252,7 +252,28 @@ body {
   transition: background 0.12s, transform 0.12s;
 }
 
+.cell { position: relative; }
 .cell.zero { background: var(--cell-zero); color: var(--muted); }
+
+/* Signed tiles (Fight mode). A negative value is drawn as its magnitude in
+   red, with no minus sign; positive is green. */
+.cell.green-tile { color: var(--legal); }
+.cell.red-tile {
+  color: var(--illegal);
+  background: color-mix(in srgb, var(--illegal) 14%, var(--cell));
+}
+
+.threat-flags {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  font-size: 0.6rem;
+  line-height: 1;
+  letter-spacing: -1px;
+  color: var(--illegal);
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
 .cell.locked { outline: 2px solid var(--locked); }
 .cell.blocked { background: var(--blocked); }
 

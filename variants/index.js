@@ -1,5 +1,6 @@
 import { orderBoard } from './orderBoard.js';
 import { lineLevel } from './lineLevel.js';
+import { fight } from './fight.js';
 
 // Each entry implements the shared interface documented in core/engine.js.
 // Variants decide *when* a tile's number turns into score; the engine owns
@@ -7,6 +8,7 @@ import { lineLevel } from './lineLevel.js';
 export const VARIANTS = {
   lineLevel,
   orderBoard,
+  fight,
 };
 
 export function getVariant(name) {

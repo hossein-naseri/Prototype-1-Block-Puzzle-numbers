@@ -30,8 +30,20 @@
         <input id="set-max-value" type="number" min="1" step="1" />
       </label>
       <label class="setting">
-        <span>Strikes to lose</span>
+        <span>Strikes to lose <small>(not used in Fight)</small></span>
         <input id="set-max-strikes" type="number" min="1" step="1" />
+      </label>
+      <label class="setting fight-only">
+        <span>Threatened tiles / turn <small>(Fight)</small></span>
+        <input id="set-threats-per-turn" type="number" min="0" step="1" />
+      </label>
+      <label class="setting fight-only">
+        <span>Max triangles per tile <small>(Fight)</small></span>
+        <input id="set-threat-max-stacks" type="number" min="1" step="1" />
+      </label>
+      <label class="setting fight-only">
+        <span>Control to win % <small>(Fight)</small></span>
+        <input id="set-control-threshold" type="number" min="1" max="100" step="1" />
       </label>
     </div>
 

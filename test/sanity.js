@@ -7,6 +7,7 @@ import { generateBlock, createBlock, absoluteCells } from '../core/blocks.js';
 import { SeededRng } from '../core/rng.js';
 import { lineLevel } from '../variants/lineLevel.js';
 import { orderBoard } from '../variants/orderBoard.js';
+import { fight, resolveConversions, countControl, controlTarget, rollThreats } from '../variants/fight.js';
 import { variantConfigs } from '../config/config.js';
 
 function t(name, fn) {
@@ -21,6 +22,7 @@ function t(name, fn) {
 }
 
 const CFG = variantConfigs.lineLevel;
+const FIGHT = variantConfigs.fight;
 
 // ---- legality -------------------------------------------------------
 
@@ -38,26 +40,32 @@ t('placement off the edge of the board is illegal', () => {
 t('-1 on 0 is now legal and clamps rather than going negative', () => {
   const board = createBoard(3);
   assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'minus1' }]), true);
-  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], 9);
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], CFG);
   assert.strictEqual(cellAt(next, 0, 0).value, 0);
 });
 
-t('/2 requires an even value but is fine on 0', () => {
+t('/2 now halves odd values too, rounding the magnitude down', () => {
   const board = createBoard(3);
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), true); // 0 -> 0
-  cellAt(board, 0, 0).value = 3;
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), false); // odd
-  cellAt(board, 0, 0).value = 4;
-  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), true);
+  cellAt(board, 0, 0).value = 5;
+  assert.strictEqual(canPlace(board, [{ r: 0, c: 0, op: 'div2' }]), true, 'odd is legal now');
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'div2' }], CFG);
+  assert.strictEqual(cellAt(next, 0, 0).value, 2, '5 / 2 = 2');
+});
+
+t('/2 on a red value rounds its magnitude down too', () => {
+  const board = createBoard(3);
+  cellAt(board, 0, 0).value = -5;
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'div2' }], FIGHT);
+  assert.strictEqual(cellAt(next, 0, 0).value, -2, 'red 5 -> red 2, not red 3');
 });
 
 t('one illegal cell fails the whole placement', () => {
   const board = createBoard(3);
-  cellAt(board, 0, 1).value = 3; // odd, /2 illegal here
+  cellAt(board, 0, 1).allowedOps = new Set(['minus1']); // stone: +1 not allowed
   assert.strictEqual(
     canPlace(board, [
-      { r: 0, c: 0, op: 'plus1' },
-      { r: 0, c: 1, op: 'div2' },
+      { r: 0, c: 0, op: 'plus1' }, // fine on its own
+      { r: 0, c: 1, op: 'plus1' }, // rejected by the stone
     ]),
     false
   );
@@ -78,7 +86,7 @@ t('a stone-locked cell only accepts its allowed ops (plus none)', () => {
 t('a tile pushed above maxValue costs a strike and resets to maxValue', () => {
   const board = createBoard(3);
   cellAt(board, 1, 1).value = 9;
-  const { board: next, strikesAdded } = applyPlacement(board, [{ r: 1, c: 1, op: 'plus1' }], 9);
+  const { board: next, strikesAdded } = applyPlacement(board, [{ r: 1, c: 1, op: 'plus1' }], CFG);
   assert.strictEqual(cellAt(next, 1, 1).value, 9, 'resets to the cap, not above it');
   assert.strictEqual(strikesAdded, 1);
 });
@@ -86,7 +94,7 @@ t('a tile pushed above maxValue costs a strike and resets to maxValue', () => {
 t('overshooting the cap by a lot still costs exactly one strike per tile', () => {
   const board = createBoard(3);
   cellAt(board, 0, 0).value = 8; // x2 -> 16, far above the cap
-  const { board: next, strikesAdded } = applyPlacement(board, [{ r: 0, c: 0, op: 'x2' }], 9);
+  const { board: next, strikesAdded } = applyPlacement(board, [{ r: 0, c: 0, op: 'x2' }], CFG);
   assert.strictEqual(cellAt(next, 0, 0).value, 9);
   assert.strictEqual(strikesAdded, 1);
 });
@@ -94,7 +102,7 @@ t('overshooting the cap by a lot still costs exactly one strike per tile', () =>
 t('staying at or under the cap costs no strike', () => {
   const board = createBoard(3);
   cellAt(board, 0, 0).value = 8;
-  const { strikesAdded } = applyPlacement(board, [{ r: 0, c: 0, op: 'plus1' }], 9);
+  const { strikesAdded } = applyPlacement(board, [{ r: 0, c: 0, op: 'plus1' }], CFG);
   assert.strictEqual(strikesAdded, 0);
 });
 
@@ -372,6 +380,171 @@ t('opening deals are playable across many seeds', () => {
     if (createGame(lineLevel, { ...CFG }, s * 7919).gameOver) dead++;
   }
   assert.strictEqual(dead, 0, `${dead} dead openings`);
+});
+
+// ---- fight mode ------------------------------------------------------
+
+function fightBoard(rows) {
+  const size = rows.length;
+  const board = createBoard(size);
+  rows.forEach((row, r) => row.forEach((v, c) => { cellAt(board, r, c).value = v; }));
+  return board;
+}
+
+t('fight: signed values are not clamped at 0', () => {
+  const board = createBoard(3);
+  const { board: next } = applyPlacement(board, [{ r: 0, c: 0, op: 'minus1' }], FIGHT);
+  assert.strictEqual(cellAt(next, 0, 0).value, -1, '0 with red pressure becomes red 1');
+});
+
+t('fight: magnitude is capped in both directions, with no strikes', () => {
+  const board = createBoard(3);
+  cellAt(board, 0, 0).value = -8;
+  const { board: next, strikesAdded } = applyPlacement(board, [{ r: 0, c: 0, op: 'x2' }], FIGHT);
+  assert.strictEqual(cellAt(next, 0, 0).value, -9, 'red 16 clamps to the cap');
+  assert.strictEqual(strikesAdded, 0, 'signed mode never charges strikes');
+});
+
+t('fight: a red tile flanked by 2 equal-or-higher green tiles flips green', () => {
+  // green 3 | red 3 | green 3   -> the red is surrounded on either side
+  const board = fightBoard([
+    [3, -3, 3],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  const flips = resolveConversions(board);
+  assert.deepStrictEqual(flips, [{ r: 0, c: 1, from: -3, to: 3 }]);
+});
+
+t('fight: conversion needs the surrounders to be equal or higher', () => {
+  const board = fightBoard([
+    [2, -3, 2],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  assert.deepStrictEqual(resolveConversions(board), [], 'green 2 cannot flip red 3');
+});
+
+t('fight: one horizontal + one vertical neighbour converts a corner tile', () => {
+  const board = fightBoard([
+    [-2, 2, 0],
+    [2, 0, 0],
+    [0, 0, 0],
+  ]);
+  const flips = resolveConversions(board);
+  assert.deepStrictEqual(flips, [{ r: 0, c: 0, from: -2, to: 2 }]);
+});
+
+t('fight: a single neighbour is not enough', () => {
+  const board = fightBoard([
+    [-2, 2, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  assert.deepStrictEqual(resolveConversions(board), []);
+});
+
+t('fight: red converts green by the same rule', () => {
+  const board = fightBoard([
+    [-4, 4, -4],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  const flips = resolveConversions(board);
+  assert.deepStrictEqual(flips, [{ r: 0, c: 1, from: 4, to: -4 }]);
+});
+
+t('fight: a converted tile keeps its magnitude', () => {
+  const board = fightBoard([
+    [7, -5, 7],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  assert.strictEqual(resolveConversions(board)[0].to, 5);
+});
+
+t('fight: neutral 0 tiles neither convert nor are converted', () => {
+  const board = fightBoard([
+    [3, 0, 3],
+    [0, 0, 0],
+    [-1, 0, -1],
+  ]);
+  const flipped = resolveConversions(board).map((f) => `${f.r},${f.c}`);
+  assert.ok(!flipped.includes('0,1'), 'a 0 tile is not a conversion target');
+});
+
+t('fight: control target is more than 70% of the board', () => {
+  assert.strictEqual(controlTarget(9, 0.7), 7, '9 * 0.7 = 6.3, so 7');
+  assert.strictEqual(controlTarget(16, 0.7), 12, '16 * 0.7 = 11.2, so 12');
+  assert.strictEqual(controlTarget(10, 0.7), 8, 'exactly 7 is not "more than"');
+});
+
+t('fight: holding the target share wins, and the mirror loses', () => {
+  const green = fightBoard([
+    [1, 1, 1],
+    [1, 1, 1],
+    [1, 0, 0],
+  ]);
+  assert.deepStrictEqual(countControl(green), { green: 7, red: 0, total: 9 });
+  assert.strictEqual(fight.getOutcome(green, {}, FIGHT).won, true);
+
+  const red = fightBoard([
+    [-1, -1, -1],
+    [-1, -1, -1],
+    [-1, 0, 0],
+  ]);
+  assert.strictEqual(fight.getOutcome(red, {}, FIGHT).lost, true);
+});
+
+t('fight: 6 of 9 tiles is not yet a win', () => {
+  const board = fightBoard([
+    [1, 1, 1],
+    [1, 1, 1],
+    [0, 0, 0],
+  ]);
+  assert.strictEqual(fight.getOutcome(board, {}, FIGHT).won, undefined);
+});
+
+t('fight: threats pick the configured number of distinct tiles, 1..maxStacks', () => {
+  const rng = new SeededRng(4242);
+  const board = createBoard(3);
+  const threats = rollThreats(rng, board, FIGHT);
+  const keys = Object.keys(threats);
+  assert.strictEqual(keys.length, 3);
+  assert.strictEqual(new Set(keys).size, 3, 'distinct tiles');
+  for (const stacks of Object.values(threats)) {
+    assert.ok(stacks >= 1 && stacks <= 2, `stacks ${stacks} out of range`);
+  }
+});
+
+t('fight: a run starts with threats already queued', () => {
+  const game = createGame(fight, FIGHT, 99);
+  assert.strictEqual(Object.keys(game.variantState.threats).length, 3);
+  assert.strictEqual(game.variantState.round, 1);
+  assert.strictEqual(game.rowQuotas.length, 0, 'fight opts out of line quotas');
+});
+
+t('fight: queued threats land at the end of the turn and advance the round', () => {
+  const board = createBoard(3);
+  const rng = new SeededRng(7);
+  const state = { threats: { '0,0': 2, '1,1': 1 }, round: 1 };
+  const result = fight.onTurnEnd(board, state, FIGHT, rng);
+  const byCell = Object.fromEntries(result.mutations.map((m) => [`${m.r},${m.c}`, m.patch.value]));
+  assert.strictEqual(byCell['0,0'], -2, '2 triangles -> red 2');
+  assert.strictEqual(byCell['1,1'], -1, '1 triangle -> red 1');
+  assert.strictEqual(result.variantState.round, 2);
+  assert.strictEqual(Object.keys(result.variantState.threats).length, 3, 'next turn re-rolled');
+});
+
+t('fight: a threat on a green tile lowers it rather than flipping it', () => {
+  const board = fightBoard([
+    [5, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  const result = fight.onTurnEnd(board, { threats: { '0,0': 2 }, round: 1 }, FIGHT, new SeededRng(1));
+  const m = result.mutations.find((x) => x.r === 0 && x.c === 0);
+  assert.strictEqual(m.patch.value, 3, 'green 5 minus 2 red pressure = green 3');
 });
 
 console.log('\nsanity checks complete');

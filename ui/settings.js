@@ -26,6 +26,9 @@ export function defaultSettings() {
     startValue: baseConfig.startValue,
     maxValue: baseConfig.maxValue,
     maxStrikes: baseConfig.maxStrikes,
+    threatsPerTurn: 3,
+    threatMaxStacks: 2,
+    controlPercent: 70,
     blockSizeWeights: { ...baseConfig.blockSizeWeights },
     operatorWeights: { ...baseConfig.operatorWeights },
   };
@@ -65,6 +68,9 @@ function sanitize(raw) {
     startValue,
     maxValue: intOr(raw.maxValue, defaults.maxValue, 1),
     maxStrikes: intOr(raw.maxStrikes, defaults.maxStrikes, 1),
+    threatsPerTurn: intOr(raw.threatsPerTurn, defaults.threatsPerTurn, 0),
+    threatMaxStacks: intOr(raw.threatMaxStacks, defaults.threatMaxStacks, 1),
+    controlPercent: Math.min(100, intOr(raw.controlPercent, defaults.controlPercent, 1)),
     blockSizeWeights: sanitizeWeights(
       raw.blockSizeWeights,
       BLOCK_SIZES,
@@ -113,6 +119,9 @@ export function applySettings(config, settings) {
     startValue: settings.startValue,
     maxValue: settings.maxValue,
     maxStrikes: settings.maxStrikes,
+    threatsPerTurn: settings.threatsPerTurn,
+    threatMaxStacks: settings.threatMaxStacks,
+    controlThreshold: settings.controlPercent / 100,
     blockSizeWeights: { ...settings.blockSizeWeights },
     operatorWeights: { ...settings.operatorWeights },
   };
