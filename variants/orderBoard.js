@@ -19,6 +19,7 @@ export const orderBoard = {
     const mutations = [];
     const events = [];
     const scoredTiles = [];
+    const scoredLines = [];
 
     for (const changed of placement.changedCells) {
       if (changed.prevValue === changed.value) continue; // 'none' op, nothing moved
@@ -28,6 +29,10 @@ export const orderBoard = {
       if (value === target) {
         mutations.push({ r, c, patch: { value: 0, allowedOps: null } });
         scoredTiles.push({ r, c, value });
+        // Order Board scores single tiles, not lines, so a bank counts as a
+        // match on both the row and the column it sat on.
+        scoredLines.push({ kind: 'row', index: r, value });
+        scoredLines.push({ kind: 'col', index: c, value });
         banks += 1;
         events.push({ type: 'bank', r, c, target });
         if (banks % config.incrementEvery === 0) {
@@ -44,7 +49,7 @@ export const orderBoard = {
       }
     }
 
-    return { mutations, scoredTiles, events, variantState: { target, banks } };
+    return { mutations, scoredTiles, scoredLines, events, variantState: { target, banks } };
   },
 
   isGameOver(board, hand) {

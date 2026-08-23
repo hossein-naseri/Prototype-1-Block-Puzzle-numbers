@@ -53,43 +53,49 @@ placements shake and never mutate state.
 Hands are re-rolled at deal time if they have no legal placement anywhere,
 so a deal is always playable.
 
-## Scoring, and the column bars
+## Line quotas
 
-One vertical bar sits above each column — 3 columns, 3 bars on the default
-board.
+Every row shows a number to its **left**, every column shows one **below**
+it. That's the value a match on that line has to reach: **equal or higher**.
+Quotas are rolled at setup, one per line, from the seed.
 
-- When a tile's number is **turned into score**, that tile's value is
-  squared and added both to the running score and to the bar above **its
-  own column**. A scored 4 is worth 16.
-- So a cleared row of 4s sends 16 into each of the three column bars; a
-  cleared column of 4s sends 48 into that one bar.
-- Bars hold `barCapacity` (default **100**). **When every bar is full, the
-  level is won.**
+- Quotas are random in `1..maxValue`. Bounding by the tile cap rather than a
+  hard 9 keeps them achievable if the cap is lowered — a quota above the cap
+  would make the level unwinnable by construction.
+- When a qualifying match lands on a line, that line's chip flips to a green
+  checkmark. **Checks are permanent** — a later, weaker match can't undo one.
+- **When every row and column quota is checked, the level is won.**
 
-What counts as "scored" is the one thing the core delegates — it's exactly
-what distinguishes the two variants.
+Tiles also still score: a scored tile is worth its value squared, feeding
+the score readout. That's a stat now, not a win condition.
+
+What counts as a match *on a line* is the one thing the core delegates — see
+the variants below.
 
 ## Win / lose
 
 | outcome | condition |
 |---|---|
-| **Win** | every column bar reaches `barCapacity` |
+| **Win** | every row and column quota is checked |
 | **Lose** | `maxStrikes` strikes accumulated |
 | **Lose** | no legal placement exists for any block in hand |
 
-A placement can both fill the last bar and take the final strike. The
+A placement can both check the last quota and take the final strike. The
 strike is applied during operator resolution, *before* the variant gets a
 chance to score anything, so it lands first and the loss takes precedence.
 
 ## Variants
 
-Both sit on the identical core; they differ only in when a tile's number
-converts to score.
+Both sit on the identical core; they differ only in what counts as a match
+on a line, and therefore when a quota gets checked.
 
 ### Line Level
-A row or column scores when every tile in it is equal and non-zero. Each
-tile in that line scores at its own value, then resets to 0. A tile at the
-intersection of two simultaneously-clearing lines scores once, not twice.
+A row or column matches when every tile in it is equal and non-zero. The
+match is attributed to **that line only** — clearing a row ticks the row's
+quota, not the quotas of the three columns it crosses. Every tile in the
+line scores at its value, then resets to 0. A tile at the intersection of
+two simultaneously-clearing lines scores once, not twice, but both lines
+still count as matched.
 
 ### Order Board
 A target number is shown, starting at `startTarget` (default 3). A tile
@@ -97,6 +103,10 @@ landing exactly on the target scores at its value and resets to 0. A tile
 landing *above* the target locks into a **stone** — only `-1` and `÷2` may
 touch it — until it comes back down. The target rises by 1 every
 `incrementEvery` banks (default 5).
+
+Order Board scores single tiles rather than lines, so a bank counts as a
+match on **both** the row and the column that tile sat on. Without that it
+could never satisfy a line quota at all.
 
 ## Seeded RNG
 
@@ -114,7 +124,7 @@ deal is unaffected — every variant starts from the same board.
 
 ```
 /core        board state, block generation, number rules, legality,
-             placement resolution, score bars, win/lose
+             placement resolution, line quotas, win/lose
 /variants    one module per variant — decides only what counts as scoring
 /config      tuning values
 /ui          renderer (DOM), input, settings panel, HUD, logging
@@ -128,15 +138,17 @@ Core never imports a variant. The variant interface (see `core/engine.js`):
   init(config, rng) -> { board?, variantState }                    // optional
   getNextHand(rng, config, variantState) -> { hand, variantState } // optional
   onPlacementResolved(board, placement, variantState, config)
-      -> { mutations, scoredTiles, events, variantState? }
+      -> { mutations, scoredTiles, scoredLines, events, variantState? }
   isGameOver(board, hand, variantState, config) -> bool            // optional
   getHudState(board, variantState, config) -> {}                   // optional
 }
 ```
 
-`scoredTiles` is `[{ r, c, value }]` — the tiles whose numbers became score
-this placement. The engine squares each value, banks it, and routes it to
-the right column bar. The variant never touches score or bars directly.
+`scoredTiles` is `[{ r, c, value }]` — tiles whose numbers became score.
+`scoredLines` is `[{ kind: 'row'|'col', index, value }]` — scoring events
+attributed to a whole line. The engine squares tile values into the score
+and ticks a line's quota when a `scoredLines` entry reaches it. Variants
+never touch score, quotas, or the win check directly.
 
 `board` passed into `onPlacementResolved` already has the placement's
 operators applied (and the strike cap enforced); the variant returns only
@@ -151,9 +163,8 @@ editable live from the in-page Settings panel.
 
 | key | default | meaning |
 |---|---|---|
-| `boardSize` | 3 | grid is `boardSize × boardSize`; one bar per column |
-| `barCapacity` | 100 | how much each column bar holds; all full = win |
-| `maxValue` | 9 | tile cap — above this costs a strike and resets to it |
+| `boardSize` | 3 | grid is `boardSize × boardSize`; one quota per row and column |
+| `maxValue` | 9 | tile cap — above this costs a strike and resets to it; also the quota ceiling |
 | `maxStrikes` | 5 | strikes before the run is lost |
 | `startValue` | 0 | value every tile starts at, or `'random'` |
 | `blockSizeWeights` | 1: .30 / 2: .45 / 3: .25 | block tile-count spawn rate |
@@ -181,19 +192,30 @@ block, versus **34/60** at the shipped `30/45/25`. On a larger board the
 
 ### Known tuning gap
 
-At `barCapacity: 100` the win is very hard to reach — a greedy bot won
-0/60 (Line Level) and 2/60 (Order Board). Lowering capacity moves it
-sharply:
+The win is demanding: on a 3×3 it needs all 6 quotas (3 rows + 3 columns)
+checked, with quotas averaging 5 when rolled in 1..9. Simulating a
+quota-seeking bot over 60 seeds:
 
-| capacity | Line Level | Order Board |
-|---|---|---|
-| 20 | 10/60 | 17/60 |
-| 40 | 4/60 | 11/60 |
-| 60 | 2/60 | 5/60 |
-| 100 | 0/60 | 2/60 |
+| quota ceiling (`maxValue`) | Line Level wins | avg quotas met | Order Board wins | avg quotas met |
+|---|---|---|---|---|
+| 9 (default) | 0/60 | 16% | 0/60 | 51% |
+| 6 | 0/60 | 24% | 6/60 | 67% |
+| 5 | 0/60 | 26% | 7/60 | 71% |
+| 4 | 0/60 | 41% | 5/60 | 71% |
+| 3 | 0/60 | 41% | 4/60 | 69% |
 
-100 is kept as the default because it was the specified starting value.
-`barCapacity` is a panel field, so this is a one-box change to explore.
+Order Board responds well to a lower ceiling; Line Level doesn't, and the
+reason is structural rather than numeric. A line clear **zeroes its tiles**,
+which destroys the progress every crossing line needs — so satisfying all
+three rows *and* all three columns means rebuilding the board from scratch
+between clears. Lowering `maxValue` shrinks the quotas but doesn't change
+that.
+
+Levers if this proves too hard in playtesting: a lower `maxValue`, a larger
+board (more lines, but far more placement freedom), or changing what a Line
+Level clear is attributed to — crediting the crossing columns as well as the
+cleared row would make it dramatically easier. That last one is a rules
+change, so it's flagged here rather than assumed.
 
 ## Logging
 

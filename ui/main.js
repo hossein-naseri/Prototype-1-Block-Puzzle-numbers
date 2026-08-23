@@ -5,8 +5,8 @@ import { seedFromString, randomSeed } from '../core/rng.js';
 import {
   renderBoard,
   renderBlockGlyph,
-  renderScoreBars,
-  pulseBars,
+  renderQuotas,
+  pulseQuotas,
   showPreview,
   clearPreview,
   shakeCells,
@@ -26,7 +26,8 @@ import {
 } from './settings.js';
 
 const boardEl = document.getElementById('board');
-const barsEl = document.getElementById('score-bars');
+const rowQuotasEl = document.getElementById('row-quotas');
+const colQuotasEl = document.getElementById('col-quotas');
 const handEl = document.getElementById('hand');
 const nextHandEl = document.getElementById('next-hand');
 const scoreEl = document.getElementById('score');
@@ -42,7 +43,6 @@ const gameOverEl = document.getElementById('game-over');
 const exportBtn = document.getElementById('export-log');
 
 const boardSizeEl = document.getElementById('set-board-size');
-const barCapacityEl = document.getElementById('set-bar-capacity');
 const maxValueEl = document.getElementById('set-max-value');
 const maxStrikesEl = document.getElementById('set-max-strikes');
 const startValueEl = document.getElementById('set-start-value');
@@ -103,7 +103,6 @@ function startGame() {
     startValue: config.startValue,
     maxValue: config.maxValue,
     maxStrikes: config.maxStrikes,
-    barCapacity: config.barCapacity,
     blockSizeWeights: config.blockSizeWeights,
     operatorWeights: config.operatorWeights,
   });
@@ -118,7 +117,8 @@ function render() {
     (r, c) => onCellDrop(r, c),
     (r, c) => onCellClick(r, c)
   );
-  renderScoreBars(barsEl, state.bars, config.barCapacity, state.board.size);
+  renderQuotas(rowQuotasEl, state.rowQuotas, state.rowChecked, 'row');
+  renderQuotas(colQuotasEl, state.colQuotas, state.colChecked, 'col');
   renderHand();
   scoreEl.textContent = String(state.score);
   strikesEl.textContent = `${state.strikes} / ${config.maxStrikes}`;
@@ -130,7 +130,7 @@ function render() {
     gameOverEl.hidden = false;
     gameOverEl.classList.toggle('win', state.won);
     if (state.won) {
-      gameOverEl.textContent = `All bars full — you win! ${state.turns} turns`;
+      gameOverEl.textContent = `All quotas met — you win! ${state.turns} turns`;
     } else if (state.strikes >= config.maxStrikes) {
       gameOverEl.textContent = `${state.strikes} strikes — out. Score ${state.score}`;
     } else {
@@ -207,8 +207,8 @@ function commitPlacement(blockId, r, c) {
   if (struck) flashCells(boardEl, struck.cells, 'strike-flash');
   else if (result.placement) flashCells(boardEl, result.placement.changedCells);
 
-  const filled = result.events.find((e) => e.type === 'barFill');
-  if (filled) pulseBars(barsEl, [...new Set(filled.scoredTiles.map((t) => t.c))]);
+  const met = result.events.find((e) => e.type === 'quotaMet');
+  if (met) pulseQuotas(rowQuotasEl, colQuotasEl, met.lines);
 }
 
 // Minimal drag support: pointerdown on a hand slot starts a drag; the board
@@ -267,7 +267,6 @@ function renderWeightRows(container, keys, labels, weightsKey) {
 
 function renderSettingsPanel() {
   boardSizeEl.value = String(settings.boardSize);
-  barCapacityEl.value = String(settings.barCapacity);
   maxValueEl.value = String(settings.maxValue);
   maxStrikesEl.value = String(settings.maxStrikes);
 
@@ -299,7 +298,6 @@ function bindNumberSetting(el, key, min) {
 }
 
 bindNumberSetting(boardSizeEl, 'boardSize', 2);
-bindNumberSetting(barCapacityEl, 'barCapacity', 1);
 bindNumberSetting(maxValueEl, 'maxValue', 1);
 bindNumberSetting(maxStrikesEl, 'maxStrikes', 1);
 bindNumberSetting(startValueEl, 'startValue', 0);

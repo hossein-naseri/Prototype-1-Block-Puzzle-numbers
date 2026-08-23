@@ -14,10 +14,16 @@ import { SeededRng } from './rng.js';
 //   init(config, rng) -> { board?, variantState }                   (optional)
 //   getNextHand(rng, config, variantState) -> { hand, variantState } (optional)
 //   onPlacementResolved(board, placement, variantState, config)
-//       -> { mutations, scoredTiles, events, variantState? }
+//       -> { mutations, scoredTiles, scoredLines, events, variantState? }
 //          scoredTiles: [{ r, c, value }] - tiles whose number was turned
-//          into score this placement. The engine squares each value, adds
-//          it to that tile's column bar, and adds it to the total score.
+//            into score this placement. The engine squares each value into
+//            the running score.
+//          scoredLines: [{ kind: 'row'|'col', index, value }] - scoring
+//            events attributed to a whole line. The engine ticks that
+//            line's quota if value >= the quota. Each variant decides what
+//            counts: Line Level reports the line it cleared; Order Board
+//            reports both the row and the column a banked tile sat on,
+//            since it scores single tiles rather than lines.
 //   isGameOver(board, hand, variantState, config) -> bool           (optional)
 //   getHudState(board, variantState, config) -> {}                  (optional)
 
@@ -64,14 +70,22 @@ function applyStartValues(board, config, rng) {
   return board;
 }
 
-// Squared tile value is the single score formula: a scored 4 is worth 16,
-// both to the running score and to that tile's column bar.
+// Squared tile value is the score formula: a scored 4 is worth 16.
 export function tileScore(value) {
   return value * value;
 }
 
-function barsFull(bars, capacity) {
-  return bars.length > 0 && bars.every((fill) => fill >= capacity);
+// Every row and every column is given a quota in 1..maxValue. Bounding by
+// maxValue (rather than a hard 9) keeps quotas achievable if the tile cap
+// is lowered - a quota the player can never reach would make the level
+// unwinnable by construction.
+export function rollQuotas(rng, boardSize, maxValue) {
+  const ceiling = Math.max(1, maxValue);
+  return Array.from({ length: boardSize }, () => 1 + rng.int(ceiling));
+}
+
+function allChecked(rowChecked, colChecked) {
+  return [...rowChecked, ...colChecked].every(Boolean);
 }
 
 export function createGame(variant, config, seed) {
@@ -91,6 +105,11 @@ export function createGame(variant, config, seed) {
 
   if (!usedVariantBoard) applyStartValues(board, config, rng);
 
+  // Rolled before the hands are dealt so the whole setup is reproducible
+  // from the seed.
+  const rowQuotas = rollQuotas(rng, board.size, config.maxValue);
+  const colQuotas = rollQuotas(rng, board.size, config.maxValue);
+
   const first = dealHand(variant, rng, config, variantState, board);
   variantState = first.variantState;
   const hand = first.hand;
@@ -109,7 +128,10 @@ export function createGame(variant, config, seed) {
     hand,
     nextHand,
     variantState,
-    bars: new Array(board.size).fill(0),
+    rowQuotas,
+    colQuotas,
+    rowChecked: new Array(board.size).fill(false),
+    colChecked: new Array(board.size).fill(false),
     strikes: 0,
     score: 0,
     turns: 0,
@@ -165,6 +187,7 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
   const result = variant.onPlacementResolved(boardAfterCore, placement, state.variantState, state.config) || {};
   const mutations = result.mutations || [];
   const scoredTiles = result.scoredTiles || [];
+  const scoredLines = result.scoredLines || [];
   const events = [...(result.events || [])];
   let variantState = result.variantState || state.variantState;
 
@@ -174,17 +197,23 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
 
   const finalBoard = applyMutations(boardAfterCore, mutations);
 
-  // Each scored tile fills the bar above its own column.
-  const bars = [...state.bars];
   let scoreDelta = 0;
-  for (const { c, value } of scoredTiles) {
-    const gained = tileScore(value);
-    scoreDelta += gained;
-    if (c >= 0 && c < bars.length) bars[c] += gained;
+  for (const { value } of scoredTiles) scoreDelta += tileScore(value);
+
+  // A line's quota is ticked by any scoring event on it that reaches the
+  // stated value. Checks are permanent once earned.
+  const rowChecked = [...state.rowChecked];
+  const colChecked = [...state.colChecked];
+  const newlyChecked = [];
+  for (const { kind, index, value } of scoredLines) {
+    const checked = kind === 'row' ? rowChecked : colChecked;
+    const quotas = kind === 'row' ? state.rowQuotas : state.colQuotas;
+    if (index < 0 || index >= checked.length) continue;
+    if (checked[index] || value < quotas[index]) continue;
+    checked[index] = true;
+    newlyChecked.push({ kind, index, value, quota: quotas[index] });
   }
-  if (scoredTiles.length > 0) {
-    events.push({ type: 'barFill', scoredTiles: scoredTiles.map((t) => ({ ...t, gained: tileScore(t.value) })) });
-  }
+  if (newlyChecked.length > 0) events.push({ type: 'quotaMet', lines: newlyChecked });
 
   const strikes = state.strikes + strikesAdded;
 
@@ -205,14 +234,14 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
   // chance to score anything, so it lands first and the loss takes
   // precedence over the win.
   const lostToStrikes = strikes >= state.config.maxStrikes;
-  const won = !lostToStrikes && barsFull(bars, state.config.barCapacity);
+  const won = !lostToStrikes && allChecked(rowChecked, colChecked);
   const stuck = variant.isGameOver
     ? variant.isGameOver(finalBoard, hand, variantState, state.config)
     : false;
   const gameOver = won || lostToStrikes || stuck;
 
   if (lostToStrikes) events.push({ type: 'strikeOut', strikes });
-  if (won) events.push({ type: 'win', bars });
+  if (won) events.push({ type: 'win' });
 
   const nextState = {
     ...state,
@@ -220,7 +249,8 @@ export function placeBlock(variant, state, blockId, anchorR, anchorC) {
     hand,
     nextHand,
     variantState,
-    bars,
+    rowChecked,
+    colChecked,
     strikes,
     score: state.score + scoreDelta,
     turns: state.turns + 1,

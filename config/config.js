@@ -30,14 +30,12 @@ export const baseConfig = {
   startValue: 0,
 
   // TUNABLE. Tile cap. A tile pushed above this costs one strike and is
-  // reset to exactly this value. Also the ceiling for 'random' start values.
+  // reset to exactly this value. Also the ceiling for 'random' start values
+  // and for the random row/column quotas, so a quota is always reachable.
   maxValue: 9,
 
   // TUNABLE. Strikes the player can take before losing.
   maxStrikes: 5,
-
-  // TUNABLE. How much each column's score bar holds. All bars full = win.
-  barCapacity: 100,
 
   // TUNABLE. Relative weights for each cell's operator draw. Also
   // normalized, so the settings panel can show percentages without forcing
