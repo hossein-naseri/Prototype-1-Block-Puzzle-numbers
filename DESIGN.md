@@ -91,16 +91,31 @@ on a line, and therefore when a quota gets checked.
 
 ### Line Level
 A row or column matches when every tile in it is equal and non-zero. The
-match is attributed to **that line only** — clearing a row ticks the row's
-quota, not the quotas of the three columns it crosses. Every tile in the
-line scores at its value, then resets to 0. A tile at the intersection of
-two simultaneously-clearing lines scores once, not twice, but both lines
-still count as matched.
+match is attributed to **that line only** — matching a row ticks the row's
+quota, not the quotas of the three columns it crosses.
+
+**Matched tiles keep their values.** Nothing is reset to 0, so a match is
+purely additive: the board is sculpted upward rather than repeatedly
+emptied. That has two consequences worth knowing:
+
+- A matched line *stays* matched until the player disturbs it, so a line is
+  reported only when it **becomes** matched — or re-matches at a different
+  value, which is how you upgrade a line to clear a higher quota. Without
+  that transition check a standing match would re-score on every placement
+  for the rest of the run.
+- Filling the whole board with one value ≥ every quota now satisfies all
+  rows and columns at once, which is a real and reachable win line.
+
+Because tiles are no longer consumed, a tile sitting where two lines match
+simultaneously scores for both — each line match is its own event.
 
 ### Order Board
 A target number is shown, starting at `startTarget` (default 3). A tile
-landing exactly on the target scores at its value and resets to 0. A tile
-landing *above* the target locks into a **stone** — only `-1` and `÷2` may
+landing exactly on the target scores at its value and **keeps that value**
+— only the stone lock is released. A bank fires off the cells a placement
+changed, so it can only happen on the move that lands the tile on the
+target; a tile left sitting there doesn't re-bank. A tile landing *above*
+the target locks into a **stone** — only `-1` and `÷2` may
 touch it — until it comes back down. The target rises by 1 every
 `incrementEvery` banks (default 5).
 
@@ -190,32 +205,39 @@ over 60 seeds, `15/25/60` ended **56/60** runs with an unplaceable last
 block, versus **34/60** at the shipped `30/45/25`. On a larger board the
 3-tile shapes breathe again and a heavier 3 mix is reasonable.
 
-### Known tuning gap
+### Known problem: the ÷2 dead end
 
-The win is demanding: on a 3×3 it needs all 6 quotas (3 rows + 3 columns)
-checked, with quotas averaging 5 when rolled in 1..9. Simulating a
-quota-seeking bot over 60 seeds:
+Keeping matched values fixed the structural issue that used to make Line
+Level unwinnable (clears wiping the progress crossing lines needed). Order
+Board went from 0/60 wins to **10/60** with a quota-seeking bot over 60
+seeds. But Line Level is still 0/60, and the cause is now something else
+entirely:
 
-| quota ceiling (`maxValue`) | Line Level wins | avg quotas met | Order Board wins | avg quotas met |
-|---|---|---|---|---|
-| 9 (default) | 0/60 | 16% | 0/60 | 51% |
-| 6 | 0/60 | 24% | 6/60 | 67% |
-| 5 | 0/60 | 26% | 7/60 | 71% |
-| 4 | 0/60 | 41% | 5/60 | 71% |
-| 3 | 0/60 | 41% | 4/60 | 69% |
+**53 of 60 Line Level runs ended with no legal move — and in 100% of those,
+every remaining block in hand carried a `÷2` with no even tile to land it
+on.** Not the quota design; the `÷2`-needs-an-even-value rule.
 
-Order Board responds well to a lower ceiling; Line Level doesn't, and the
-reason is structural rather than numeric. A line clear **zeroes its tiles**,
-which destroys the progress every crossing line needs — so satisfying all
-three rows *and* all three columns means rebuilding the board from scratch
-between clears. Lowering `maxValue` shrinks the quotas but doesn't change
-that.
+It got worse with this change, and predictably so: values used to be reset
+to 0 (even) on every match, which constantly replenished legal `÷2` targets.
+Now odd values accumulate and never leave. Typical stuck state:
 
-Levers if this proves too hard in playtesting: a lower `maxValue`, a larger
-board (more lines, but far more placement freedom), or changing what a Line
-Level clear is attributed to — crediting the crossing columns as well as the
-cleared row would make it dramatically easier. That last one is a rules
-change, so it's flagged here rather than assumed.
+```
+board  0 9 2 / 5 9 6 / 3 3 3      hand  DIAG_DOWN  ÷2 / ÷2 / -1
+```
+
+Note these all occur on the **last block of a hand**. The existing re-roll
+guarantee only checks a full 3-block deal, so it can't help once two blocks
+are spent.
+
+Three levers, none applied since each is a rules decision:
+
+1. **Drop the `÷2` weight** (currently 4.5%). Cheapest, and a settings-panel
+   change — but with 3 blocks × up to 3 cells it still surfaces often.
+2. **Extend the re-roll guarantee to the remaining hand**, not just the full
+   deal. Uses machinery that already exists, but effectively retires "no
+   legal placement" as a loss condition.
+3. **Let `÷2` round down on odd values.** Removes the dead end at the root,
+   at the cost of the one hard placement restriction left in the game.
 
 ## Logging
 

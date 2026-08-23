@@ -27,7 +27,11 @@ export const orderBoard = {
       const cell = cellAt(board, r, c);
 
       if (value === target) {
-        mutations.push({ r, c, patch: { value: 0, allowedOps: null } });
+        // The tile keeps its value - only the stone lock is released. A bank
+        // fires off changedCells, so it can only happen on the move that
+        // lands the tile on the target; a tile left sitting there doesn't
+        // re-bank on later placements.
+        mutations.push({ r, c, patch: { allowedOps: null } });
         scoredTiles.push({ r, c, value });
         // Order Board scores single tiles, not lines, so a bank counts as a
         // match on both the row and the column it sat on.

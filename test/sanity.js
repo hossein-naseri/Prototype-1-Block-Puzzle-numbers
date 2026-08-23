@@ -105,18 +105,53 @@ t('score for a tile is its value squared', () => {
   assert.strictEqual(tileScore(9), 81);
 });
 
-t('a cleared row of 4s scores 16 per tile and is attributed to that row', () => {
+t('a matched row of 4s scores 16 per tile and is attributed to that row', () => {
   const board = createBoard(3);
   for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
   const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, {}, CFG);
   assert.strictEqual(result.scoredTiles.length, 3);
   assert.ok(result.scoredTiles.every((tile) => tileScore(tile.value) === 16));
-  assert.ok(result.mutations.every((m) => m.patch.value === 0));
   // The match was made on the row, so only the row's quota is a candidate.
   assert.deepStrictEqual(result.scoredLines, [{ kind: 'row', index: 1, value: 4 }]);
 });
 
-t('line level does not clear a row that is not fully uniform', () => {
+t('a matched line keeps its values - nothing is reset to 0', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, {}, CFG);
+  assert.deepStrictEqual(result.mutations, [], 'no mutations at all, so no zeroing');
+});
+
+t('a standing match does not re-score on later placements', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const first = lineLevel.onPlacementResolved(board, { changedCells: [] }, { matchedAt: {} }, CFG);
+  assert.strictEqual(first.scoredLines.length, 1);
+
+  const second = lineLevel.onPlacementResolved(board, { changedCells: [] }, first.variantState, CFG);
+  assert.deepStrictEqual(second.scoredLines, [], 'unchanged line must not fire again');
+  assert.deepStrictEqual(second.scoredTiles, []);
+});
+
+t('re-matching a line at a higher value fires again', () => {
+  const board = createBoard(3);
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 4;
+  const first = lineLevel.onPlacementResolved(board, { changedCells: [] }, { matchedAt: {} }, CFG);
+
+  for (let c = 0; c < 3; c++) cellAt(board, 1, c).value = 7; // upgraded
+  const second = lineLevel.onPlacementResolved(board, { changedCells: [] }, first.variantState, CFG);
+  assert.deepStrictEqual(second.scoredLines, [{ kind: 'row', index: 1, value: 7 }]);
+});
+
+t('a board filled with one value matches every row and column at once', () => {
+  const board = createBoard(3);
+  for (const cell of board.cells) cell.value = 9;
+  const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, { matchedAt: {} }, CFG);
+  assert.strictEqual(result.scoredLines.length, 6, '3 rows + 3 columns');
+  assert.ok(result.scoredLines.every((l) => l.value === 9));
+});
+
+t('line level does not match a row that is not fully uniform', () => {
   const board = createBoard(3);
   cellAt(board, 1, 0).value = 6;
   cellAt(board, 1, 1).value = 6;
@@ -125,16 +160,20 @@ t('line level does not clear a row that is not fully uniform', () => {
   assert.strictEqual(result.scoredTiles.length, 0);
 });
 
-t('a tile at the crossing of two clearing lines only scores once', () => {
+t('a row and a column matching at once are both reported', () => {
   const board = createBoard(3);
   for (let i = 0; i < 3; i++) {
     cellAt(board, 1, i).value = 2; // middle row
     cellAt(board, i, 1).value = 2; // middle column
   }
-  const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, {}, CFG);
-  const keys = result.scoredTiles.map((tile) => `${tile.r},${tile.c}`);
-  assert.strictEqual(new Set(keys).size, keys.length, 'no tile scored twice');
-  assert.strictEqual(keys.length, 5, 'a full plus-shape is 5 distinct tiles');
+  const result = lineLevel.onPlacementResolved(board, { changedCells: [] }, { matchedAt: {} }, CFG);
+  assert.deepStrictEqual(
+    result.scoredLines.sort((a, b) => a.kind.localeCompare(b.kind)),
+    [
+      { kind: 'col', index: 1, value: 2 },
+      { kind: 'row', index: 1, value: 2 },
+    ]
+  );
 });
 
 t('quotas are rolled for every row and column, within 1..maxValue', () => {
@@ -253,7 +292,9 @@ t('order board banks a tile that lands exactly on target and scores it', () => {
   const placement = { changedCells: [{ r: 0, c: 0, op: 'plus1', prevValue: 2, value: 3 }] };
   const result = orderBoard.onPlacementResolved(board, placement, { target: 3, banks: 0 }, variantConfigs.orderBoard);
   assert.deepStrictEqual(result.scoredTiles, [{ r: 0, c: 0, value: 3 }]);
-  assert.strictEqual(result.mutations.find((m) => m.r === 0 && m.c === 0).patch.value, 0);
+  const patch = result.mutations.find((m) => m.r === 0 && m.c === 0).patch;
+  assert.ok(!('value' in patch), 'a banked tile keeps its value');
+  assert.strictEqual(patch.allowedOps, null, 'only the stone lock is released');
   assert.strictEqual(result.variantState.banks, 1);
 });
 
