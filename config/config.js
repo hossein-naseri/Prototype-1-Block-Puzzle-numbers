@@ -15,14 +15,14 @@ export const baseConfig = {
   // TUNABLE. Relative spawn weights per block tile-count. Normalized by the
   // RNG, so these don't need to sum to anything.
   //
-  // Weighted toward the smaller blocks because most 3-tile shapes span all
-  // 3 cells of a 3x3 board, leaving them only one legal anchor. A 3-heavy
-  // mix dead-ends constantly there (simulated: 56/60 runs ended with an
-  // unplaceable last block, vs 34/60 at these weights).
+  // 3-tile blocks dominate. That used to dead-end constantly on a 3x3,
+  // since most 3-tile shapes span the full width and so have a single legal
+  // anchor - but ÷2 now accepts any value, so no placement can be rejected
+  // for numeric reasons and the dead end is gone.
   blockSizeWeights: {
-    1: 0.3,
-    2: 0.45,
-    3: 0.25,
+    1: 0.1,
+    2: 0.25,
+    3: 0.65,
   },
 
   // TUNABLE. Starting value for every tile. A number, or 'random' to give
@@ -41,11 +41,11 @@ export const baseConfig = {
   // normalized, so the settings panel can show percentages without forcing
   // the playtester to balance them by hand.
   operatorWeights: {
-    none: 0.55,
-    plus1: 0.18,
-    minus1: 0.18,
+    none: 0.5,
+    plus1: 0.31,
+    minus1: 0.11,
     x2: 0.045,
-    div2: 0.045,
+    div2: 0.035,
   },
 };
 

@@ -150,29 +150,39 @@ The engine calls this end-of-turn phase through an `onTurnEnd` hook, which
 fires when the last block of a hand is placed and before the next hand is
 dealt — so the new hand is judged against the resolved board.
 
-**Conversion.** A tile flips colour when **at least 2 of its 4 orthogonal
-neighbours** are the opposing colour with magnitude ≥ its own. The flipped
-tile keeps its magnitude and only changes sign — a red 3 surrounded by two
-green 3s becomes a green 3. This works both ways: red converts green by the
-same rule.
+**Conversion.** One-directional: **green takes red tiles, red never takes
+green ones.** A red tile flips when
 
-The brief phrases the surround as "one cell on either side, or one
-horizontal and one vertical". Between them those cover all 6 pairs drawn
-from 4 orthogonal neighbours, so the rule reduces to "any two of them" —
-which is also what lets corner tiles (only two neighbours, one horizontal
-and one vertical) be converted at all.
+```
+(its own strength + its red neighbours' strength) < (its green neighbours' strength)
+```
 
-Two details not spelled out in the brief, resolved this way:
+counting only the 4 orthogonal neighbours, and requiring **at least 2** of
+them to be green. Ties do nothing — red has to be strictly out-muscled. The
+flipped tile keeps its magnitude and only changes sign; the surrounding
+tiles are untouched.
 
-- **Neutral 0 tiles neither convert nor are converted.** They have no
-  colour, so they can't be a target and can't count toward surrounding one.
-- **Flips are simultaneous, and don't cascade.** Every tile is judged
-  against a snapshot and all flips apply together, so the result doesn't
-  depend on scan order and neither colour gets to move first. A flip that
-  newly enables another waits for the next resolution rather than chaining.
+Worked example: a red 3 with a red 1 to the north and a red 2 to the east
+(red total 3 + 1 + 2 = 6), and a green 4 to the west and a green 3 to the
+south (green total 7). Two green neighbours, and 6 < 7, so it becomes a
+green 3.
 
-Conversion is checked after every placement and again after the threats
-land.
+Because a corner tile has exactly two orthogonal neighbours (one horizontal,
+one vertical), the "at least 2 green" requirement still lets corners be
+taken.
+
+**Conversions cascade.** A flip changes the sums for its neighbours, so the
+board is re-scanned until nothing more converts. This terminates by
+construction: every flip turns a red tile green and nothing ever turns a
+green tile red, so each pass strictly reduces the red count.
+
+Two details not spelled out, resolved this way:
+
+- **Neutral 0 tiles neither convert nor count.** They have no colour, so
+  they can't be a target and add nothing to either side's strength.
+- **Conversion happens only in the end-of-turn phase**, after the threats
+  land — matching the brief's "at the end of the turn the red tile becomes
+  a green tile". Placements during the turn only move numbers.
 
 **Win / lose.** Whichever side holds more than `controlThreshold` (default
 **70%**) of the tiles ends the run — green wins, red loses. On a 3×3 that's
@@ -252,8 +262,8 @@ editable live from the in-page Settings panel.
 | `maxValue` | 9 | tile cap — above this costs a strike and resets to it; also the quota ceiling |
 | `maxStrikes` | 5 | strikes before the run is lost |
 | `startValue` | 0 | value every tile starts at, or `'random'` |
-| `blockSizeWeights` | 1: .30 / 2: .45 / 3: .25 | block tile-count spawn rate |
-| `operatorWeights` | none .55 / +1 .18 / -1 .18 / ×2 .045 / ÷2 .045 | per-cell operator draw |
+| `blockSizeWeights` | 1: .10 / 2: .25 / 3: .65 | block tile-count spawn rate |
+| `operatorWeights` | none .50 / +1 .31 / -1 .11 / ×2 .045 / ÷2 .035 | per-cell operator draw |
 | `handSize` | 3 | blocks offered per hand (not exposed in the panel) |
 | `orderBoard.startTarget` | 3 | starting target number |
 | `orderBoard.incrementEvery` | 5 | banks per target increment |
@@ -271,40 +281,35 @@ Settings persist in `localStorage` and **restart the run on change** — the
 values they control are baked in at deal time, so applying them mid-run
 would produce a board matching neither ruleset.
 
-### Why the block-size default leans small
+### Fight Mode balance
 
-Most 3-tile shapes span all 3 cells of a 3×3 board, so they have only one
-legal anchor. A 3-heavy mix dead-ends constantly: simulating a greedy bot
-over 60 seeds, `15/25/60` ended **56/60** runs with an unplaceable last
-block, versus **34/60** at the shipped `30/45/25`. On a larger board the
-3-tile shapes breathe again and a heavier 3 mix is reasonable.
+Fight Mode used to be hopeless for green — a control-maximising bot won
+**1/60** at the original numbers, because red applied 3–6 points of pressure
+per turn while green's hand carried barely any `+1` cells.
 
-### Fight Mode is heavily red-favoured at the specified defaults
+Three changes fixed it together: the higher `+1` weight (.18 → .31),
+green-only conversion, and cascading. Same bot, same 60 seeds, at the
+current defaults:
 
-Simulating a control-maximising bot over 60 seeds at the brief's numbers
-(3 threatened tiles per turn, 1–2 triangles each), **red wins 59/60** —
-average final board 0.6 green vs 7.0 red, over ~7 rounds.
+**24 wins / 30 losses / 6 stalemates**, averaging 4.0 green vs 4.6 red
+tiles over ~29 rounds. Close to a coin flip, and games now run long enough
+to have a shape.
 
-The arithmetic is one-sided: red applies 3–6 points of pressure every turn
-(3 tiles × 1–2), while a hand of 3 blocks carries only a couple of `+1`
-cells at the default operator weights. Green simply can't out-produce it.
-
-The two threat knobs are a clean difficulty dial, though — same bot, same
-seeds:
+The threat knobs remain the difficulty dial, and they're much less brutal
+than before:
 
 | threats/turn | max triangles | green wins |
 |---|---|---|
-| 1 | 1 | 53/60 |
-| 1 | 2 | 34/60 |
-| 2 | 1 | 29/60 |
-| 2 | 2 | 16/60 |
-| 3 | 1 | 6/60 |
-| 3 | 2 (default) | 1/60 |
+| 1 | 1 | 60/60 |
+| 2 | 1 | 60/60 |
+| 2 | 2 | 59/60 |
+| 3 | 1 | 59/60 |
+| 3 | 2 (default) | 24/60 |
 
-The defaults are left exactly as specified. Both knobs are in the settings
-panel, so `threats=2, maxStacks=1` is one edit away if you want a fair
-fight, or `1/1` for a gentle one. Raising the `+1` operator weight is the
-other lever.
+Note how sharp the cliff is: anything below the default is a walkover for
+green. The default is where the tension lives. The 6 stalemates are runs
+that hit the simulation's 400-placement cap without either side reaching
+70% — worth watching for in real play.
 
 ### Known problem: the ÷2 dead end
 

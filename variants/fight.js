@@ -9,6 +9,10 @@ import { confine } from '../core/resolve.js';
 // the value -2. All arithmetic is ordinary signed arithmetic, which makes
 // the operators read naturally from either side: +1 pushes a tile toward
 // green, -1 toward red, x2 doubles whoever holds it.
+//
+// A turn is all three blocks. Placements only move numbers; the queued red
+// threats land and conversions resolve together in one phase at the end of
+// the turn (see onTurnEnd).
 
 const NEIGHBOURS = [
   [-1, 0],
@@ -42,43 +46,73 @@ export function rollThreats(rng, board, config) {
   return threats;
 }
 
-// A tile flips when at least 2 of its 4 orthogonal neighbours are the
-// opposing colour with magnitude >= its own.
+// Conversion is one-directional: green takes red tiles, red never takes
+// green ones. A red tile flips when
 //
-// The brief spells this out as "one cell on either side, or one horizontal
-// and one vertical" — between them those cover all 6 pairs drawn from the 4
-// orthogonal neighbours, so the rule is simply "any two of them". That's
-// also what lets corner tiles (which only have two neighbours, one
-// horizontal and one vertical) be converted at all.
+//     (its own strength + its red neighbours' strength)
+//       < (its green neighbours' strength)
 //
-// Flips are evaluated against a snapshot and applied together, so the
-// outcome doesn't depend on scan order and neither colour gets to move
-// first. One pass per resolution point — a flip that newly enables another
-// waits for the next placement rather than cascading.
-export function resolveConversions(board) {
+// counting only the 4 orthogonal neighbours, and requiring at least 2 of
+// them to be green. Ties do nothing - red has to be strictly out-muscled.
+// The flipped tile keeps its magnitude and only changes sign; the
+// surrounding tiles are untouched.
+//
+// Worked example from the brief: a red 3 with red 1 to the north and red 2
+// to the east (red total 3+1+2 = 6) and green 4 to the west and green 3 to
+// the south (green total 7). Two green neighbours, and 6 < 7, so it becomes
+// a green 3.
+//
+// Conversions cascade: a flip changes the sums for its neighbours, so the
+// board is re-scanned until nothing more converts. That terminates because
+// every flip turns a red tile green and nothing ever turns a green tile
+// red, so each pass strictly reduces the number of red tiles.
+function conversionPass(cells, size) {
   const flips = [];
 
-  forEachCell(board, (r, c, cell) => {
-    const value = cell.value;
-    if (value === 0) return;
-    const magnitude = Math.abs(value);
-    const sign = Math.sign(value);
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      const value = cells[r * size + c].value;
+      if (value >= 0) continue; // only red tiles can be converted
 
-    let surrounders = 0;
-    for (const [dr, dc] of NEIGHBOURS) {
-      const nr = r + dr;
-      const nc = c + dc;
-      if (!inBounds(board.size, nr, nc)) continue;
-      const other = cellAt(board, nr, nc).value;
-      if (Math.sign(other) === -sign && Math.abs(other) >= magnitude) surrounders += 1;
-    }
+      let redStrength = -value; // the tile's own strength counts for red
+      let greenStrength = 0;
+      let greenNeighbours = 0;
 
-    if (surrounders >= 2) {
-      flips.push({ r, c, from: value, to: -value });
+      for (const [dr, dc] of NEIGHBOURS) {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (!inBounds(size, nr, nc)) continue;
+        const other = cells[nr * size + nc].value;
+        if (other < 0) redStrength += -other;
+        else if (other > 0) {
+          greenStrength += other;
+          greenNeighbours += 1;
+        }
+      }
+
+      if (greenNeighbours >= 2 && redStrength < greenStrength) {
+        flips.push({ r, c, from: value, to: -value });
+      }
     }
-  });
+  }
 
   return flips;
+}
+
+export function resolveConversions(board) {
+  const cells = board.cells.map((cell) => ({ ...cell }));
+  const all = [];
+
+  // Bounded by the cell count: each pass flips at least one red tile green,
+  // and no pass can ever flip one back.
+  for (let pass = 0; pass < cells.length; pass++) {
+    const flips = conversionPass(cells, board.size);
+    if (flips.length === 0) break;
+    for (const flip of flips) cells[flip.r * board.size + flip.c].value = flip.to;
+    all.push(...flips);
+  }
+
+  return all;
 }
 
 export function countControl(board) {
@@ -125,9 +159,11 @@ export const fight = {
     };
   },
 
-  onPlacementResolved(board) {
-    const { mutations, events } = conversionResult(board);
-    return { mutations, scoredTiles: [], scoredLines: [], events };
+  // Placements only move numbers. Everything else - threats landing,
+  // conversions - happens in one resolution phase at the end of the turn,
+  // once all three blocks are down.
+  onPlacementResolved() {
+    return { mutations: [], scoredTiles: [], scoredLines: [], events: [] };
   },
 
   onTurnEnd(board, variantState, config, rng) {

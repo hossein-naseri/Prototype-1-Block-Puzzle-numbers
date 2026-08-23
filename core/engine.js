@@ -106,7 +106,11 @@ export function createGame(variant, config, seed) {
   variantState = second.variantState;
   const nextHand = second.hand;
 
-  const gameOver = variant.isGameOver ? variant.isGameOver(board, hand, variantState, config) : false;
+  // A starting board can already be decided - e.g. a Fight run whose start
+  // value hands one side the whole board - so the variant's own outcome is
+  // checked here too, not just after the first placement.
+  const initialOutcome = variant.getOutcome ? variant.getOutcome(board, variantState, config) || {} : {};
+  const stuck = variant.isGameOver ? variant.isGameOver(board, hand, variantState, config) : false;
 
   return {
     variantName: variant.name,
@@ -124,8 +128,9 @@ export function createGame(variant, config, seed) {
     strikes: 0,
     score: 0,
     turns: 0,
-    gameOver,
-    won: false,
+    gameOver: stuck || initialOutcome.won === true || initialOutcome.lost === true,
+    won: initialOutcome.won === true,
+    outcomeReason: initialOutcome.reason || null,
     lastEvents: [],
     illegalAttempts: 0,
   };
