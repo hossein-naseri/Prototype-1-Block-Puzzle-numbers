@@ -400,6 +400,12 @@ body {
 
 #strikes-readout.danger { color: var(--illegal); font-weight: 700; }
 
+#app-version {
+  font-size: 0.7rem;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
 #statbar button {
   margin-left: auto;
   background: var(--cell);

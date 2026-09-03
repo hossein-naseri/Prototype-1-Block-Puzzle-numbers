@@ -1,3 +1,8 @@
+// Bumped on every push. Shown in the footer so a playtester can confirm at
+// a glance which build they actually have - the module graph is cached per
+// file, so a stale browser can otherwise mix versions invisibly.
+export const APP_VERSION = 'build 9';
+
 // All the "starting values, not constants" from the design brief live here.
 // Each variant config extends the shared base below.
 //

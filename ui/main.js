@@ -1,4 +1,4 @@
-import { getConfig, VARIANT_NAMES, VARIANT_LABELS } from '../config/config.js';
+import { getConfig, VARIANT_NAMES, VARIANT_LABELS, APP_VERSION } from '../config/config.js';
 import { getVariant } from '../variants/index.js';
 import { createGame, placeBlock, previewPlacement, getHudState } from '../core/engine.js';
 import { seedFromString, randomSeed } from '../core/rng.js';
@@ -375,6 +375,8 @@ seedCopyBtn.addEventListener('click', async () => {
 exportBtn.addEventListener('click', () => {
   createLogger.exportAll();
 });
+
+document.getElementById('app-version').textContent = APP_VERSION;
 
 readParams();
 populateVariantSelect();
